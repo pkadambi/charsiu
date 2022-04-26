@@ -2,6 +2,13 @@
 __pycache__/
 *.py[cod]
 
+# Results and experiment directories
+charsiu_w2v2*/
+*.TextGrid
+*.wav
+results*
+*__pycache__*
+
 # C extensions
 *.so
 

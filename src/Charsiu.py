@@ -97,7 +97,7 @@ class charsiu_forced_aligner(charsiu_aligner):
 
     def __init__(self, aligner, sil_threshold=4, **kwargs):
         super(charsiu_forced_aligner, self).__init__(**kwargs)
-        self.aligner = Wav2Vec2ForFrameClassification.from_pretrained(aligner, cahce_dir='./cache')
+        self.aligner = Wav2Vec2ForFrameClassification.from_pretrained(aligner)
         self.sil_threshold = sil_threshold
 
         self._freeze_model()

@@ -32,6 +32,11 @@ def prepare_common_voice_dataset(batch):
     batch["input_values"] = re.search(r'(.*?)\.mp3', batch['path']).group(1) + '.wav'
     return batch
 
+def prepare_pretraining_dataset(batch):
+    # check that all files have the correct sampling rate
+
+    batch["input_values"] = batch['file']
+    return batch
 
 def prepare_multicn_dataset(batch):
     # check that all files have the correct sampling rate
@@ -40,10 +45,10 @@ def prepare_multicn_dataset(batch):
     return batch
 
 
-def audio_preprocess(path):
+def audio_preprocess(path, processor):
     features, sr = sf.read(path)
     assert sr == 16000
-    return processor(features, sampling_rate=16000).input_values.squeeze()
+    return processor(features, sampling_rate=16000).input_values[0].squeeze()
 
 
 @dataclass
@@ -73,6 +78,7 @@ class DataCollatorWithPadding:
     """
 
     processor: Wav2Vec2Processor
+    model: Wav2Vec2ForPreTraining
     padding: Union[bool, str] = True
     return_attention_mask: Optional[bool] = True
     max_length: Optional[int] = None
@@ -84,7 +90,7 @@ class DataCollatorWithPadding:
         str, torch.Tensor]:
         # split inputs and labels since they have to be of different lenghts and need
         # different padding methods
-        input_features = [{"input_values": audio_preprocess(feature["input_values"])} for feature in features]
+        input_features = [{"input_values": audio_preprocess(feature["input_values"], self.processor)} for feature in features]
 
         batch = self.processor.pad(
             input_features,
@@ -95,8 +101,9 @@ class DataCollatorWithPadding:
             return_tensors="pt",
         )
         batch_size, raw_sequence_length = batch['input_values'].shape
-        sequence_length = model._get_feat_extract_output_lengths(raw_sequence_length)
-        batch['mask_time_indices'] = _compute_mask_indices((batch_size, sequence_length), mask_prob=0.1, mask_length=2)
+        sequence_length = self.model._get_feat_extract_output_lengths(raw_sequence_length)
+        batch['mask_time_indices'] = torch.Tensor(_compute_mask_indices((batch_size, sequence_length),
+                                        mask_prob=0.1, mask_length=2)).type(torch.BoolTensor).to(device)
 
         return batch
 
