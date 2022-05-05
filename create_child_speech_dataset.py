@@ -14,7 +14,7 @@ class ChildSpeechDataset(torch.utils.data.Dataset):
         # Extract Audios
         print('Loading audio files')
         self.audios = self.extract_audio()
-
+        self.audio_lens = [len(_audio) for _audio in self.audios]
         # Extract speaker ids and file ids
         self.speaker_ids = [_path.split('/')[-2] for _path in self.audio_paths]
         self.ids = [_path.split('/')[-1].split('.')[0] for _path in self.audio_paths]
@@ -124,8 +124,8 @@ class ChildSpeechDataset(torch.utils.data.Dataset):
 
     def return_as_dict(self):
         dct = DatasetDict({'file': self.audio_paths, 'audio':self.audios, 'phone_alignments': self.phone_alignments,
-               'word_alignments': self.word_alignments, 'speaker_id': self.speaker_ids,
-                           'id': self.ids, 'sentence': self.text_transcripts, 'frame_labels': self.frame_phn_labels,
+               'word_alignments': self.word_alignments, 'speaker_id': self.speaker_ids, 'audio_len': self.audio_lens,
+                           'id': self.ids, 'sentence': self.text_transcripts, 'frame_phones': self.frame_phn_labels,
                            'frame_times': self.frame_times})
         return dct
 

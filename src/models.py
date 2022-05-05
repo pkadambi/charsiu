@@ -3,6 +3,7 @@
 
 
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -52,6 +53,7 @@ class ForwardSumLoss(torch.nn.Module):
             # construct the target sequence. Every
             # text token is mapped to a unique sequence number,
             # thereby ensuring the monotonicity constraint
+            # print(bid)
             target_seq = torch.arange(1, text_lens[bid] + 1)
             target_seq = target_seq.unsqueeze(0)
             curr_logprob = attn_logprob_pd[bid].permute(1, 0, 2)
@@ -132,176 +134,6 @@ class RNN(nn.Module):
         return out
 
 
-class Wav2Vec2ForAttentionAlignment(Wav2Vec2ForPreTraining):
-    '''
-    Implementation adapted from: https://huggingface.co/transformers/_modules/transformers/models/wav2vec2/modeling_wav2vec2.html#Wav2Vec2ForPreTraining
-    '''
-
-    def __init__(self, config):
-        super().__init__(config)
-        bert_config = self.get_bert_config(config)
-        self.bert = BertForMaskedPhoneLM(bert_config)
-        self.cnn = ConvBank(config.hidden_size,
-                            config.bert_hidden_size,
-                            config.bert_convbank,
-                            config.bert_hidden_size,
-                            config.bert_hidden_size,
-                            config.hidden_dropout)
-        # self.lm_head = nn.Linear(config.hidden_size,config.vocab_size)
-        #        self.project_hid = nn.Linear(config.hidden_size, config.proj_codevector_dim)
-        #        self.phone_rnn = RNN(384,config.vocab_size)
-
-        self.attention = Attention(config.bert_hidden_size)
-        self.align_loss = ForwardSumLoss()
-
-    def freeze_wav2vec2(self):
-        for param in self.wav2vec2.parameters():
-            param.requires_grad = False
-
-    def initialize_phone_model(self, path):
-
-        self.bert = BertForMaskedPhoneLM.from_pretrained(path)
-
-    def get_bert_config(self, config):
-        bert_config = BertConfig(architectures=config.bert_architectures,
-                                 attention_probs_dropout_prob=config.bert_attention_probs_dropout_prob,
-                                 gradient_checkpointing=config.bert_gradient_checkpointing,
-                                 hidden_act=config.bert_hidden_act,
-                                 hidden_dropout_prob=config.bert_hidden_dropout_prob,
-                                 hidden_size=config.bert_hidden_size,
-                                 initializer_range=config.bert_initializer_range,
-                                 intermediate_size=config.bert_intermediate_size,
-                                 layer_norm_eps=config.bert_layer_norm_eps,
-                                 max_position_embeddings=config.bert_max_position_embeddings,
-                                 model_type=config.bert_model_type,
-                                 num_attention_heads=config.bert_num_attention_heads,
-                                 num_hidden_layers=config.bert_num_hidden_layers,
-                                 pad_token_id=config.bert_pad_token_id,
-                                 position_embedding_type=config.bert_position_embedding_type,
-                                 transformers_version=config.bert_transformers_version,
-                                 type_vocab_size=config.bert_type_vocab_size,
-                                 use_cache=config.bert_use_cache,
-                                 vocab_size=config.bert_vocab_size,
-                                 convbank=config.bert_convbank)
-
-        return bert_config
-
-    def forward(
-            self,
-            input_values,
-            attention_mask=None,
-            output_attentions=None,
-            output_hidden_states=None,
-            mask_time_indices=None,
-            return_dict=None,
-            labels=None,
-            labels_attention_mask=None,
-            text_len=None,
-            frame_len=None,
-            weight=1
-    ):
-
-        # check the availability of attention masks
-        # if not present, create full attention masks
-        if attention_mask is None:
-            attention_mask = torch.ones_like(input_values)
-
-        if labels_attention_mask is None:
-            labels_attention_mask = torch.ones_like(labels)
-
-        outputs = self.wav2vec2(
-            input_values,
-            attention_mask=attention_mask,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            mask_time_indices=mask_time_indices,
-            return_dict=return_dict,
-        )
-
-        # acoustic embeddings
-        frame_hidden = outputs[0]
-        #        frame_hidden = self.dropout(frame_hidden)
-        frame_hidden = self.cnn(frame_hidden)
-
-        # phone embeddings
-        phone_hidden = self.bert(input_ids=labels, attention_mask=labels_attention_mask).hidden_states[-1]
-
-        # compute cross attention
-        att_out, energy = self.attention(frame_hidden, phone_hidden, labels_attention_mask)
-
-        # start masked modeling
-        # 0. remove the blank symbol
-        # 1. project all transformed features (including masked) to final vq dim
-        transformer_features = self.project_hid(torch.tanh(att_out))
-
-        # 2. quantize all (unmasked) extracted features and project to final vq dim
-        extract_features = self.dropout_features(outputs[1])
-        quantized_features, codevector_perplexity = self.quantizer(extract_features, mask_time_indices)
-        quantized_features = self.project_q(quantized_features)
-
-        # if attention_mask is passed, make sure that padded feature vectors cannot be sampled
-        if attention_mask is not None:
-            # compute reduced attention_mask correponding to feature vectors
-            attention_mask = self._get_feature_vector_attention_mask(extract_features.shape[1], attention_mask)
-
-        #        loss_fct = nn.CrossEntropyLoss()
-
-        #        phone_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
-
-        loss = None
-        if self.training:
-            # for training, we sample negatives
-            # 3. sample K negatives (distractors) quantized states for contrastive loss
-
-            negative_quantized_features = self._sample_negatives(
-                quantized_features, self.config.num_negatives, attention_mask=attention_mask
-            )
-
-            # 4. compute logits, corresponding to `logs = sim(c_t, [q_t, \sim{q}_t]) / \kappa`
-            # of equation (3) in https://arxiv.org/pdf/2006.11477.pdf
-            logits = self.compute_contrastive_logits(
-                quantized_features[None, :],
-                negative_quantized_features,
-                transformer_features,
-                self.config.contrastive_logits_temperature,
-            )
-
-            # 5. if a negative vector is identical to the positive (i.e. when codebook utilization is low),
-            # its cosine similarity will be masked
-            neg_is_pos = (quantized_features == negative_quantized_features).all(-1)
-            if neg_is_pos.any():
-                logits[1:][neg_is_pos] = float("-inf")
-
-            # 6. compute contrastive loss \mathbf{L}_m = cross_entropy(logs) =
-            # -log(exp(sim(c_t, q_t)/\kappa) / \sum_{\sim{q}} exp(sim(c_t, \sim{q})/\kappa))
-            preds = logits.transpose(0, 2).reshape(-1, logits.size(0))
-            target = ((1 - attention_mask.long()) * -100).transpose(0, 1).flatten()
-            contrastive_loss = nn.functional.cross_entropy(preds.float(), target, reduction="mean")
-
-            # 7. compute diversity loss: \mathbf{L}_d
-            # num_codevectors = self.config.num_codevectors_per_group * self.config.num_codevector_groups
-            # diversity_loss = (num_codevectors - codevector_perplexity) / num_codevectors
-
-            # 8. \mathbf{L} = \mathbf{L}_m + \alpha * \mathbf{L}_d
-            expanded_labels_attention_mask = (1 - labels_attention_mask) * -10000.0
-            expanded_labels_attention_mask = expanded_labels_attention_mask.unsqueeze(1).repeat(1, energy.size(1), 1)
-            att = torch.log_softmax(energy + expanded_labels_attention_mask, dim=-1)
-            align_loss = self.align_loss(att.unsqueeze(1), text_len, frame_len)
-
-            #            expanded_attention_mask = attention_mask.unsqueeze(2).repeat(1,1,energy.size(2)) * labels_attention_mask.unsqueeze(1).repeat(1,energy.size(1),1)
-            #            expanded_attention_mask = (1-expanded_attention_mask)*-10000.0
-            #            phone_attention = torch.softmax((energy+expanded_attention_mask).transpose(2,1),dim=-1)
-            #            phone_emb = torch.bmm(phone_attention,frame_hidden)
-            #            prediction_scores = self.phone_rnn(phone_emb,text_len)
-            #            labels = labels.masked_fill(labels_attention_mask.ne(1), -100)
-            #            inter_phone = F.cosine_similarity(phone_emb[:,:-1,:],phone_emb[:,1:,:],dim=-1)*labels_attention_mask[:,1:]
-            #            interphone_loss = torch.sum(inter_phone)/torch.sum(labels_attention_mask[:,1:])
-
-            loss = contrastive_loss + weight * align_loss  # + interphone_loss
-
-        return CausalLMOutput(
-            loss=loss, logits=energy, hidden_states=outputs.hidden_states, attentions=None
-        )
 
 
 class BertForMaskedPhoneLM(BertForMaskedLM):
@@ -649,3 +481,190 @@ class Wav2Vec2ForCTCAndPretraining(Wav2Vec2ForPreTraining):
         )
 
 
+class Wav2Vec2ForAttentionAlignment(Wav2Vec2ForCTCAndPretraining):
+    '''
+    Implementation adapted from: https://huggingface.co/transformers/_modules/transformers/models/wav2vec2/modeling_wav2vec2.html#Wav2Vec2ForPreTraining
+    '''
+
+    def __init__(self, config):
+        super().__init__(config)
+        bert_config = self.get_bert_config(config)
+        self.bert = BertForMaskedPhoneLM(bert_config)
+        self.cnn = ConvBank(config.hidden_size,
+                            config.bert_hidden_size,
+                            config.bert_convbank,
+                            config.bert_hidden_size,
+                            config.bert_hidden_size,
+                            config.hidden_dropout)
+        # self.lm_head = nn.Linear(config.hidden_size,config.vocab_size)
+        #        self.project_hid = nn.Linear(config.hidden_size, config.proj_codevector_dim)
+        #        self.phone_rnn = RNN(384,config.vocab_size)
+
+        self.attention = Attention(config.bert_hidden_size)
+        self.align_loss = ForwardSumLoss()
+
+    def freeze_wav2vec2(self):
+        for param in self.wav2vec2.parameters():
+            param.requires_grad = False
+
+    def initialize_phone_model(self, path):
+
+        self.bert = BertForMaskedPhoneLM.from_pretrained(path)
+
+    def get_bert_config(self, config):
+        bert_config = BertConfig(architectures=config.bert_architectures,
+                                 attention_probs_dropout_prob=config.bert_attention_probs_dropout_prob,
+                                 gradient_checkpointing=config.bert_gradient_checkpointing,
+                                 hidden_act=config.bert_hidden_act,
+                                 hidden_dropout_prob=config.bert_hidden_dropout_prob,
+                                 hidden_size=config.bert_hidden_size,
+                                 initializer_range=config.bert_initializer_range,
+                                 intermediate_size=config.bert_intermediate_size,
+                                 layer_norm_eps=config.bert_layer_norm_eps,
+                                 max_position_embeddings=config.bert_max_position_embeddings,
+                                 model_type=config.bert_model_type,
+                                 num_attention_heads=config.bert_num_attention_heads,
+                                 num_hidden_layers=config.bert_num_hidden_layers,
+                                 pad_token_id=config.bert_pad_token_id,
+                                 position_embedding_type=config.bert_position_embedding_type,
+                                 transformers_version=config.bert_transformers_version,
+                                 type_vocab_size=config.bert_type_vocab_size,
+                                 use_cache=config.bert_use_cache,
+                                 vocab_size=config.bert_vocab_size,
+                                 convbank=config.bert_convbank)
+
+        return bert_config
+
+    def forward(
+            self,
+            input_values,
+            attention_mask=None,
+            output_attentions=None,
+            output_hidden_states=None,
+            mask_time_indices=None,
+            return_dict=None,
+            labels=None,
+            labels_attention_mask=None,
+            text_len=None,
+            frame_len=None,
+            weight=1
+    ):
+
+        # check the availability of attention masks
+        # if not present, create full attention masks
+        if attention_mask is None:
+            attention_mask = torch.ones_like(input_values)
+
+        if labels_attention_mask is None:
+            labels_attention_mask = torch.ones_like(labels)
+
+        outputs = self.wav2vec2(
+            input_values,
+            attention_mask=attention_mask,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            mask_time_indices=mask_time_indices,
+            return_dict=return_dict,
+        )
+
+        # acoustic embeddings
+        frame_hidden = outputs[0]
+        #        frame_hidden = self.dropout(frame_hidden)
+        frame_hidden = self.cnn(frame_hidden)
+
+        # phone embeddings
+        phone_hidden = self.bert(input_ids=labels, attention_mask=labels_attention_mask).hidden_states[-1]
+
+        # compute cross attention
+        att_out, energy = self.attention(frame_hidden, phone_hidden, labels_attention_mask)
+
+        # start masked modeling
+        # 0. remove the blank symbol
+        # 1. project all transformed features (including masked) to final vq dim
+        transformer_features = self.project_hid(torch.tanh(att_out))
+
+        # 2. quantize all (unmasked) extracted features and project to final vq dim
+        extract_features = self.dropout_features(outputs[1])
+        quantized_features, codevector_perplexity = self.quantizer(extract_features, mask_time_indices)
+        quantized_features = self.project_q(quantized_features)
+
+        # if attention_mask is passed, make sure that padded feature vectors cannot be sampled
+        if attention_mask is not None:
+            # compute reduced attention_mask correponding to feature vectors
+            attention_mask = self._get_feature_vector_attention_mask(extract_features.shape[1], attention_mask)
+
+        #        loss_fct = nn.CrossEntropyLoss()
+
+        #        phone_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
+        # if text_len is not None:
+        align_loss = None
+        batch_size = labels.shape[0]
+        text_lens = phone_hidden.shape[1] * torch.ones(batch_size).int()
+        feature_lens = frame_hidden.shape[1] * torch.ones(batch_size).int()
+        expanded_labels_attention_mask = (1 - labels_attention_mask) * -10000.0
+        expanded_labels_attention_mask = expanded_labels_attention_mask.unsqueeze(1).repeat(1, energy.size(1), 1)
+        att = torch.log_softmax(energy + expanded_labels_attention_mask, dim=-1)
+        # align_loss = (1/batch_size) * \
+        #              [self.align_loss(att[ii].unsqueeze(1), text_lens=text_lens[ii], mel_lens=feature_lens[ii]) for ii in range(att.shape[0])]
+        align_loss = self.align_loss(att.unsqueeze(1), text_lens=text_lens, mel_lens=feature_lens)
+        # print('Align loss', align_loss)
+        # else:
+        #     align_loss = None
+
+        if self.training:
+            # for training, we sample negatives
+            # 3. sample K negatives (distractors) quantized states for contrastive loss
+
+            negative_quantized_features = self._sample_negatives(
+                quantized_features, self.config.num_negatives, attention_mask=attention_mask
+            )
+
+            # 4. compute logits, corresponding to `logs = sim(c_t, [q_t, \sim{q}_t]) / \kappa`
+            # of equation (3) in https://arxiv.org/pdf/2006.11477.pdf
+            logits = self.compute_contrastive_logits(
+                quantized_features[None, :],
+                negative_quantized_features,
+                transformer_features,
+                self.config.contrastive_logits_temperature,
+            )
+
+            # 5. if a negative vector is identical to the positive (i.e. when codebook utilization is low),
+            # its cosine similarity will be masked
+            neg_is_pos = (quantized_features == negative_quantized_features).all(-1)
+            if neg_is_pos.any():
+                logits[1:][neg_is_pos] = float("-inf")
+
+            # 6. compute contrastive loss \mathbf{L}_m = cross_entropy(logs) =
+            # -log(exp(sim(c_t, q_t)/\kappa) / \sum_{\sim{q}} exp(sim(c_t, \sim{q})/\kappa))
+            preds = logits.transpose(0, 2).reshape(-1, logits.size(0))
+            target = ((1 - attention_mask.long()) * -100).transpose(0, 1).flatten()
+            contrastive_loss = nn.functional.cross_entropy(preds.float(), target, reduction="mean")
+
+            # 7. compute diversity loss: \mathbf{L}_d
+            # num_codevectors = self.config.num_codevectors_per_group * self.config.num_codevector_groups
+            # diversity_loss = (num_codevectors - codevector_perplexity) / num_codevectors
+
+            # 8. \mathbf{L} = \mathbf{L}_m + \alpha * \mathbf{L}_d
+
+            #            expanded_attention_mask = attention_mask.unsqueeze(2).repeat(1,1,energy.size(2)) * labels_attention_mask.unsqueeze(1).repeat(1,energy.size(1),1)
+            #            expanded_attention_mask = (1-expanded_attention_mask)*-10000.0
+            #            phone_attention = torch.softmax((energy+expanded_attention_mask).transpose(2,1),dim=-1)
+            #            phone_emb = torch.bmm(phone_attention,frame_hidden)
+            #            prediction_scores = self.phone_rnn(phone_emb,text_len)
+            #            labels = labels.masked_fill(labels_attention_mask.ne(1), -100)
+            #            inter_phone = F.cosine_similarity(phone_emb[:,:-1,:],phone_emb[:,1:,:],dim=-1)*labels_attention_mask[:,1:]
+            #            interphone_loss = torch.sum(inter_phone)/torch.sum(labels_attention_mask[:,1:])
+
+            # loss = contrastive_loss + weight * align_loss  # + interphone_loss
+            loss = align_loss
+            return CausalLMOutput(
+                loss=loss, logits=energy, hidden_states=outputs.hidden_states, attentions=None
+            )
+
+        else:
+            #do not return logits in eval mode
+            loss = align_loss
+            output = CausalLMOutput(loss=loss, hidden_states=outputs.hidden_states, attentions=None)
+            #TODO: create AttentionAlignerCausalOutput class where aligner logits are separate from acoustic model logits
+            output.logits_aligner = energy
+            return output

@@ -23,7 +23,7 @@ from transformers.modeling_outputs import CausalLMOutput, MaskedLMOutput
 import argparse
 from create_child_speech_dataset import *
 from src.Charsiu import charsiu_forced_aligner, charsiu_attention_aligner
-
+# np.random.seed(42)
 parser = argparse.ArgumentParser()
 parser.add_argument('--mode', default='charsiu')
 parser.add_argument('--audio_dir', default='/home/prad/datasets/ChildSpeechDataset/child_speech_16_khz')
@@ -31,10 +31,12 @@ parser.add_argument('--manual_textgrids_dir', default='/home/prad/datasets/Child
 parser.add_argument('--model_output_dir', default='./child_speech_pretrained')
 parser.add_argument('--tokenizer_name', default='charsiu/tokenizer_en_cmu')
 parser.add_argument('--model_name', default='charsiu/en_w2v2_fc_10ms')
+# parser.add_argument('--results_dir', default='./results_frame_2epochs')
 parser.add_argument('--results_dir', default='./results_tmp')
 # parser.add_argument('--tokenizer_name', default='facebook/wav2vec2-base-960h')
 # parser.add_argument('--model_name', default='facebook/wav2vec2-base-960h')
-
+parser.add_argument('--filter_speaker_age', action='store_true')
+parser.add_argument('--filter_speaker_age_range', action='store_true')
 
 parser.add_argument('--dataset_dir', default='./data/child_speech_framewise')
 parser.add_argument('--output_dir', default='./outputs')
@@ -50,6 +52,15 @@ model_name = args.model_name
 mode = args.mode
 dataset_dir = args.dataset_dir
 results_dir = args.results_dir
+FILTER_AGE = args.filter_speaker_age
+if FILTER_AGE:
+    print('Filtering age')
+# FILTER_AGE = True
+FILTER_AGE_RANGE = args.filter_speaker_age_range
+if FILTER_AGE_RANGE:
+    print('Filtering age ranges')
+assert (FILTER_AGE == False and FILTER_AGE_RANGE == False) or (
+            FILTER_AGE != FILTER_AGE_RANGE), '--filter_speaker_age and --filter_speaker_age_range must be '
 
 if args.results_dir is None:
     ii=0
@@ -75,11 +86,33 @@ mapping_phone2id = tokenizer.encoder
 mapping_id2phone = tokenizer.decoder
 
 ''' Functions for data processing'''
-def speakerwise_train_test_split(dataset, speaker_id, speaker_col='speaker_id'):
+def speakerwise_train_test_split(dataset, speaker_id, speaker_col='speaker_id', age_restrict=False, age_range=False):
     test_split = dataset.filter(lambda example: speaker_id in example[speaker_col])
-    train_split = dataset.filter(lambda example: speaker_id not in example[speaker_col])
+    if age_restrict:
+        print('\nFiltering Age: ', speaker_id[:2] )
+        include_age = speaker_id[:2]
+        train_split = dataset.filter(lambda example: include_age in example[speaker_col][:2] and
+                                                     speaker_id not in example[speaker_col])
+    elif age_range:
+        if '03' in speaker_id[:2]:
+            include_ages = ['03', '04']
+        else:
+            intage = int(speaker_id[:2])
+            include_ages = ['0%d' % (intage - 1), '0%d' % intage]
+        print('\nFiltering Age Range', include_ages)
+
+        train_split = dataset.filter(lambda example: all([incl_age in example[speaker_col][:2] for incl_age in include_ages]) and
+                                                     speaker_id not in example[speaker_col])
+    else:
+        train_split = dataset.filter(lambda example: speaker_id not in example[speaker_col])
+
     return train_split, test_split
 
+def speaker_agewise_train_test_split(dataset, speaker_id, speaker_col='speaker_id'):
+    test_split = dataset.filter(lambda example: speaker_id in example[speaker_col])
+    train_split = dataset.filter(lambda example: speaker_id not in example[speaker_col])
+
+    return train_split, test_split
 def prepare_framewise_dataset(batch, mapping=mapping_phone2id):
     batch['input_values'] = batch['audio']
 
@@ -89,7 +122,7 @@ def prepare_framewise_dataset(batch, mapping=mapping_phone2id):
     phoneset = list(mapping_phone2id.keys())
     # if statement deals with any 'sp' tokens
     batch['labels'] = [mapping[phone] if phone in phoneset else mapping['[UNK]']
-                       for phone in batch["frame_labels"]]
+                       for phone in batch["frame_phones"]]
     return batch
 
 ''' Create dataset instance'''
@@ -100,16 +133,16 @@ if not os.path.exists(dataset_dir):
     child_speech_dataset = child_speech_dataset.map(prepare_framewise_dataset)
     child_speech_dataset.save_to_disk(dataset_dir)
     unique_speakers = list(set(list(child_speech_dataset['speaker_id'])))
-    train_dataset, loso_dataset = \
-            speakerwise_train_test_split(child_speech_dataset, speaker_id=unique_speakers[0])
-    train_dataset = load_from_disk(dataset_dir+'_train')
-    loso_dataset = load_from_disk(dataset_dir+'_loso')
+    # train_dataset, loso_dataset = \
+    #         speakerwise_train_test_split(child_speech_dataset, speaker_id=unique_speakers[0])
+    # train_dataset.save_to_disk(dataset_dir+'_train')
+    # loso_dataset.save_to_disk(dataset_dir+'_loso')
 else:
     print('Found dataset at:\t', dataset_dir, '\nLoading')
     child_speech_dataset = load_from_disk(dataset_dir)
     unique_speakers = list(set(list(child_speech_dataset['speaker_id'])))
-    train_dataset = load_from_disk(dataset_dir+'_train')
-    loso_dataset = load_from_disk(dataset_dir+'_loso')
+    # train_dataset = load_from_disk(dataset_dir+'_train')
+    # loso_dataset = load_from_disk(dataset_dir+'_loso')
 
 
 
@@ -291,14 +324,15 @@ def compute_metrics(pred):
 # processor = Wav2Vec2Processor(feature_extractor=feature_extractor, tokenizer=tokenizer)
 
 
-def get_loso_dataset(leave_out_speaker_id, dataset, dataset_prep_fn):
+def get_loso_dataset(leave_out_speaker_id, dataset, dataset_prep_fn, age_restrict=False, age_range=False):
     # csd = ChildSpeechDataset(audio_paths=audio_files)
     # child_speech_dataset = csd.return_as_datsets()
     dataset = dataset.map(dataset_prep_fn)
     # dataset.save_to_disk(dataset_dir)
     # unique_speakers = list(set(list(child_speech_dataset['speaker_id'])))
     train_dataset, loso_dataset = \
-            speakerwise_train_test_split(dataset, speaker_id=leave_out_speaker_id)
+            speakerwise_train_test_split(dataset, speaker_id=leave_out_speaker_id, age_restrict=age_restrict,
+                                         age_range=age_range)
     # train_dataset = load_from_disk(dataset_dir+'_train')
     # loso_dataset = load_from_disk(dataset_dir+'_loso')
     return train_dataset, loso_dataset
@@ -334,27 +368,25 @@ if __name__ == "__main__":
     completed_speakers = [x[0].split('/')[-1] for x in os.walk(results_dir)]
     speakers_to_run = list(set(unique_speakers) - set(completed_speakers))
     for jj, loso_speaker_id in enumerate(unique_speakers):
-
+        # loso_speaker_id = '0309_F_LB'
         print('-------------------------------------------------------------------------------------------------------')
         print('************************************ Started Training for Speaker *************************************')
         print('\n\n+++++++++++++++++ Speaker %s (%d/%d)+++++++++++++++++' % (loso_speaker_id, jj, len(unique_speakers)))
 
         train_dataset, loso_dataset = get_loso_dataset(leave_out_speaker_id=loso_speaker_id,
                                                        dataset=child_speech_dataset,
-                                                       dataset_prep_fn=prepare_framewise_dataset)
+                                                       dataset_prep_fn=prepare_framewise_dataset,
+                                                       age_range=FILTER_AGE_RANGE,
+                                                       age_restrict=FILTER_AGE)
 
         frameshift = 10
-
-        if frameshift == 10:
-            prepare_dataset = prepare_dataset_10ms
-        #        prepare_dataset = prepare_dataset_cv
-        else:
-            prepare_dataset = prepare_dataset_20ms
-
+        # processes the audio
         feature_extractor = Wav2Vec2FeatureExtractor(feature_size=1, sampling_rate=16000, padding_value=0.0,
                                                      do_normalize=True,
                                                      return_attention_mask=False)
         processor = Wav2Vec2Processor(feature_extractor=feature_extractor, tokenizer=tokenizer)
+
+        # avoids having to load the whole dataset into memory
         data_collator = DataCollatorClassificationWithPadding(processor=processor, padding=True)
 
         if mode == 'base':
@@ -389,8 +421,8 @@ if __name__ == "__main__":
             num_train_epochs=2,
             fp16=True,
             save_steps=500,
-            eval_steps=2,
-            logging_steps=2,
+            eval_steps=100,
+            logging_steps=100,
             learning_rate=3e-4,
             weight_decay=0.0001,
             warmup_steps=1000,
@@ -458,7 +490,7 @@ if __name__ == "__main__":
 
         print('Pretrained Eval Loss:\t', rslts_pt['eval_loss'])
         print('Fineuned Eval Loss:\t', rslts_ft['eval_loss'])
-        # speaker_wise_results.to_csv(os.path.join(results_dir, 'tmp_results.csv'))
+        speaker_wise_results.to_csv(os.path.join(results_dir, 'tmp_results.csv'))
 
-    speaker_wise_results.to_csv(os.path.join(results_dir, 'asdf.csv'))
+    speaker_wise_results.to_csv(os.path.join(results_dir, 'results.csv'))
 

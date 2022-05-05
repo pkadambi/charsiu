@@ -25,7 +25,7 @@ from transformers.models.wav2vec2.modeling_wav2vec2 import _compute_mask_indices
 from transformers.modeling_outputs import CausalLMOutput, MaskedLMOutput
 import argparse
 from create_child_speech_dataset import *
-
+np.random.seed(42)
 parser = argparse.ArgumentParser()
 parser.add_argument('--mode', default='charsiu')
 parser.add_argument('--audio_dir', default='/home/prad/datasets/ChildSpeechDataset/child_speech_16_khz')
@@ -82,7 +82,7 @@ def speakerwise_train_test_split(dataset, speaker_id, speaker_col='speaker_id'):
     train_split = dataset.filter(lambda example: speaker_id not in example[speaker_col])
     return train_split, test_split
 
-def prepare_framewise_dataset(batch, mapping=mapping_phone2id):
+def prepare_attn_dataset(batch, mapping=mapping_phone2id):
     batch['input_values'] = batch['audio']
 
     batch['labels']  = []
@@ -91,7 +91,11 @@ def prepare_framewise_dataset(batch, mapping=mapping_phone2id):
     phoneset = list(mapping_phone2id.keys())
     # if statement deals with any 'sp' tokens
     batch['labels'] = [mapping[phone] if phone in phoneset else mapping['[UNK]']
-                       for phone in batch["frame_labels"]]
+                       for phone in batch["phone_alignments"]['utterance']]
+    batch['frame_labels'] = []
+
+    batch['frame_labels'] = [mapping[phone] if phone in phoneset else mapping['[UNK]']
+                       for phone in batch["frame_phones"]]
     return batch
 
 ''' Create dataset instance'''
@@ -99,13 +103,13 @@ if not os.path.exists(dataset_dir):
     print('Dataset not found at:\t', dataset_dir, '\nCreating and saving dataset')
     csd = ChildSpeechDataset(audio_paths=audio_files)
     child_speech_dataset = csd.return_as_datsets()
-    child_speech_dataset = child_speech_dataset.map(prepare_framewise_dataset)
+    child_speech_dataset = child_speech_dataset.map(prepare_attn_dataset)
     child_speech_dataset.save_to_disk(dataset_dir)
     unique_speakers = list(set(list(child_speech_dataset['speaker_id'])))
     train_dataset, loso_dataset = \
             speakerwise_train_test_split(child_speech_dataset, speaker_id=unique_speakers[0])
-    train_dataset = load_from_disk(dataset_dir+'_train')
-    loso_dataset = load_from_disk(dataset_dir+'_loso')
+    train_dataset.save_to_disk(dataset_dir+'_train')
+    loso_dataset.save_to_disk(dataset_dir+'_loso')
 else:
     print('Found dataset at:\t', dataset_dir, '\nLoading')
     child_speech_dataset = load_from_disk(dataset_dir)
@@ -183,6 +187,7 @@ class SpeechCollatorWithPadding:
     padding: Union[bool, str] = True
     return_attention_mask: Optional[bool] = True
     max_length: Optional[int] = None
+    max_framelen: Optional[int] = None
     max_length_labels: Optional[int] = None
     pad_to_multiple_of: Optional[int] = None
     pad_to_multiple_of_labels: Optional[int] = None
@@ -192,6 +197,7 @@ class SpeechCollatorWithPadding:
         # different padding methods
         label_features = [{"input_ids": feature["labels"]} for feature in features]
         text_len = [len(i['input_ids']) for i in label_features]
+
 
 
         with self.processor.as_target_processor():
@@ -209,17 +215,22 @@ class SpeechCollatorWithPadding:
         batch = self.processor.pad(
             input_features,
             padding=self.padding,
-            max_length=self.max_length,
+            max_length=self.max_framelen,
             pad_to_multiple_of=self.pad_to_multiple_of,
             return_attention_mask=self.return_attention_mask,
             return_tensors="pt",
         )
         # replace padding with -100 to ignore loss correctly
         batch_size, raw_sequence_length = batch['input_values'].shape
+        # if self.max_framelen is not None:
+        #     sequence_length = self.max_framelen
+        # else:
         sequence_length = model._get_feat_extract_output_lengths(raw_sequence_length)
 
         mask_prob = torch.randint(size=(1, ), low=1, high=40)/100
-        batch['mask_time_indices'] = _compute_mask_indices((batch_size, sequence_length), mask_prob=mask_prob, mask_length=2)
+        masked_inds = _compute_mask_indices((batch_size, sequence_length), mask_prob=mask_prob, mask_length=2)
+        masked_inds = torch.tensor(masked_inds)
+        batch['mask_time_indices'] = masked_inds
         batch['frame_len'] = torch.tensor(mel_len)
         batch['text_len'] = torch.tensor(text_len)
         batch['labels'] = labels_batch['input_ids']
@@ -278,12 +289,15 @@ def write_textgrid_alignments_for_speaker(charsiu_aligner, loso_dataset, output_
         file_id = loso_dataset['id'][ii]
         output_tg_path = os.path.join(output_dir, speaker_id, file_id+'.TextGrid')
         output_tg_dir = os.path.join(output_dir, speaker_id)
+        # print(audiofilepath)
         if not os.path.exists(output_tg_dir):
             os.makedirs(output_tg_dir, exist_ok=True)
-        try:
-            charsiu_aligner.serve(audio = audiofilepath, text=transcripts[ii], save_to = output_tg_path)
-        except:
-            print('Error could not generate alignment for file:', audiofilepath)
+        charsiu_aligner.serve(audio=audiofilepath, text=transcripts[ii], save_to=output_tg_path)
+        # manualdf = textgridpath_to_phonedf('/home/prad/datasets/ChildSpeechDataset/manually-aligned-text-grids/'+speaker_id+'/'+file_id+'.TextGrid', phone_key='ha phones')
+        # try:
+        #     charsiu_aligner.serve(audio = audiofilepath, text=transcripts[ii], save_to = output_tg_path)
+        # except:
+        #     print('Error could not generate alignment for file:', audiofilepath)
 
 
 if __name__ == "__main__":
@@ -299,14 +313,14 @@ if __name__ == "__main__":
     completed_speakers = [x[0].split('/')[-1] for x in os.walk(results_dir)]
     speakers_to_run = list(set(unique_speakers) - set(completed_speakers))
     for jj, loso_speaker_id in enumerate(unique_speakers):
-
+        loso_speaker_id = '0307_M_EC'
         print('-------------------------------------------------------------------------------------------------------')
         print('************************************ Started Training for Speaker *************************************')
         print('\n\n+++++++++++++++++ Speaker %s (%d/%d)+++++++++++++++++' % (loso_speaker_id, jj, len(unique_speakers)))
 
         train_dataset, loso_dataset = get_loso_dataset(leave_out_speaker_id=loso_speaker_id,
                                                        dataset=child_speech_dataset,
-                                                       dataset_prep_fn=prepare_framewise_dataset)
+                                                       dataset_prep_fn=prepare_attn_dataset)
 
         frameshift = 10
 
@@ -320,7 +334,9 @@ if __name__ == "__main__":
                                                      do_normalize=True,
                                                      return_attention_mask=False)
         processor = Wav2Vec2Processor(feature_extractor=feature_extractor, tokenizer=tokenizer)
-        data_collator = SpeechCollatorWithPadding(processor=processor, padding=True)
+
+
+
 
         if mode == 'base':
             model = Wav2Vec2ForAttentionAlignment.from_pretrained(
@@ -343,6 +359,12 @@ if __name__ == "__main__":
         model.config.conv_stride[-1] = 1
         model.freeze_feature_extractor()
 
+        # Data collator
+        # calculate largest length file for padding
+        max_audio_len = max(child_speech_dataset['audio_len'])
+        MAXIMUM_FEATURE_LEN = model._get_feat_extract_output_lengths(max_audio_len).item()
+        data_collator = SpeechCollatorWithPadding(processor=processor, padding=True, max_framelen=MAXIMUM_FEATURE_LEN)
+
         # training settings
         training_args = TrainingArguments(
             output_dir=output_dir,
@@ -354,7 +376,7 @@ if __name__ == "__main__":
             num_train_epochs=2,
             fp16=True,
             save_steps=500,
-            eval_steps=2,
+            eval_steps=10,
             logging_steps=2,
             learning_rate=3e-4,
             weight_decay=0.0001,
@@ -365,7 +387,7 @@ if __name__ == "__main__":
             model=model,
             data_collator=data_collator,
             args=training_args,
-            compute_metrics=compute_metrics,
+            # compute_metrics=compute_metrics,
             train_dataset=train_dataset,
             eval_dataset=loso_dataset,
             tokenizer=processor.feature_extractor,
@@ -390,8 +412,8 @@ if __name__ == "__main__":
         speaker_wise_results.loc[loso_speaker_id, 'NumPhonesPredicted_PT'] = pt_numpredicted
         speaker_wise_results.loc[loso_speaker_id, 'NumCorrectPhones_PT'] = pt_numcorrect
         speaker_wise_results.loc[loso_speaker_id, 'AlignmentAcc_PT'] = pt_acc
-        speaker_wise_results.loc[loso_speaker_id, 'FramewisePER_PT'] = rslts_pt['eval_phone_accuracy']
-        speaker_wise_results.loc[loso_speaker_id, 'EvalLoss_PT'] = rslts_pt['eval_loss']
+        # speaker_wise_results.loc[loso_speaker_id, 'FramewisePER_PT'] = rslts_pt['eval_phone_accuracy']
+        # speaker_wise_results.loc[loso_speaker_id, 'EvalLoss_PT'] = rslts_pt['eval_loss']
 
         trainer.train()
 
@@ -399,7 +421,7 @@ if __name__ == "__main__":
         '''evaluate finetuned results'''
         # speaker_wise_results[unique_speakers[0]]
         charsiu = charsiu_attention_aligner(model_name)
-        # charsiu.aligner = model
+        charsiu.aligner = model
         write_textgrid_alignments_for_speaker(charsiu_aligner=charsiu, loso_dataset=loso_dataset,
                                               output_dir=results_dir)
         ft_acc, ft_numcorrect, ft_numpredicted = calc_accuracy_between_textgrid_lists(loso_manual_textgrids, loso_estimated_textgrids)
@@ -407,9 +429,9 @@ if __name__ == "__main__":
         speaker_wise_results.loc[loso_speaker_id, 'NumPhonesPredicted_FT'] = ft_numcorrect
         speaker_wise_results.loc[loso_speaker_id, 'NumCorrectPhones_FT'] = ft_numcorrect
         speaker_wise_results.loc[loso_speaker_id, 'AlignmentAcc_FT'] = ft_acc
-        speaker_wise_results.loc[loso_speaker_id, 'FramewisePER_FT'] = rslts_ft['eval_phone_accuracy']
-        speaker_wise_results.loc[loso_speaker_id, 'EvalLoss_FT'] = rslts_ft['eval_loss']
-        speaker_wise_results.loc[loso_speaker_id, 'NumFiles'] = len(loso_dataset)
+        # speaker_wise_results.loc[loso_speaker_id, 'FramewisePER_FT'] = rslts_ft['eval_phone_accuracy']
+        # speaker_wise_results.loc[loso_speaker_id, 'EvalLoss_FT'] = rslts_ft['eval_loss']
+        # speaker_wise_results.loc[loso_speaker_id, 'NumFiles'] = len(loso_dataset)
 
         print('\n\n+++++++++++++++++ Speaker %s (%d/%d)+++++++++++++++++' % (loso_speaker_id, jj, len(unique_speakers)))
         print('Accuracy Pretrained:\t', pt_acc)
@@ -420,7 +442,7 @@ if __name__ == "__main__":
 
         print('Pretrained Eval Loss:\t', rslts_pt['eval_loss'])
         print('Fineuned Eval Loss:\t', rslts_ft['eval_loss'])
-        # speaker_wise_results.to_csv(os.path.join(results_dir, 'tmp_results.csv'))
+        speaker_wise_results.to_csv(os.path.join(results_dir, 'tmp_results.csv'))
 
-    speaker_wise_results.to_csv(os.path.join(results_dir, 'asdf.csv'))
+    speaker_wise_results.to_csv(os.path.join(results_dir, 'results_final.csv'))
 

@@ -262,7 +262,7 @@ class charsiu_attention_aligner(charsiu_aligner):
         with torch.no_grad():
             out = self.aligner(**batch)
 
-        att = torch.softmax(out.logits, dim=-1),
+        att = torch.softmax(out.logits_aligner, dim=-1),
         preds = torch.argmax(att[0], dim=-1).cpu().detach().squeeze().numpy()
         pred_phones = [self.charsiu_processor.mapping_id2phone(phone_ids[i]) for i in preds]
         pred_phones = seq2duration(pred_phones, resolution=self.resolution)
