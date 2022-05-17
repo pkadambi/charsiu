@@ -60,7 +60,7 @@ charsiu = charsiu_attention_aligner('charsiu/en_w2v2_fs_10ms')
 
 charisu_tg_files = []
 error_files = []
-do_align = False
+do_align = True
 if do_align:
     for ii, tgfilepath in tqdm.tqdm(enumerate(manual_textgrid_files)):
         audiofname = tgfilepath.split('/')[-1][:-8] + 'wav'
