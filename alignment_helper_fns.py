@@ -141,8 +141,8 @@ def calc_accuracy_between_textgrid_lists(manual_textgrid_list, estimated_textgri
         try:
             _correct_indicator = calc_alignment_accuracy_between_textgrids(manual_textgridpath=manual_textgridpath,
                                                                            aligner_textgridpath=estimated_textgridpath,
-                                                                           manual_phonekey='ha phones',
-                                                                           aligner_phonekey='phones',
+                                                                           manual_phonekey=manual_phonekey,
+                                                                           aligner_phonekey=aligner_phonekey,
                                                                            ignore_extras=ignore_extras,
                                                                            ignore_silence=ignore_silence)
             phoneme_correct_indicator.append(_correct_indicator)

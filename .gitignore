@@ -3,12 +3,18 @@ __pycache__/
 *.py[cod]
 
 # Results and experiment directories
+models_test*/
 charsiu_w2v2*/
 child_speech_pretrained/
 *.TextGrid
 *.wav
 results*
 *__pycache__*
+.~*
+# Data Files
+for_yan.csv
+phonation_data.csv
+
 
 # C extensions
 *.so

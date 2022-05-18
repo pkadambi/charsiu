@@ -55,8 +55,8 @@ for filename in audio_files:
 from src.Charsiu import charsiu_forced_aligner, charsiu_attention_aligner
 # charsiu = charsiu_forced_aligner(aligner='charsiu/en_w2v2_fc_10ms')
 from alignment_helper_fns import *
-# charsiu = charsiu_forced_aligner('charsiu/en_w2v2_fc_10ms')
-charsiu = charsiu_attention_aligner('charsiu/en_w2v2_fs_10ms')
+charsiu = charsiu_forced_aligner('charsiu/en_w2v2_fc_10ms')
+# charsiu = charsiu_attention_aligner('charsiu/en_w2v2_fs_10ms')
 
 charisu_tg_files = []
 error_files = []
