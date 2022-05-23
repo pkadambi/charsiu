@@ -5,11 +5,13 @@ __pycache__/
 # Results and experiment directories
 charsiu_w2v2*/
 child_speech_pretrained/
+models_test*
+.~*
 *.TextGrid
 *.wav
 results*
 *__pycache__*
-
+for_yan.csv
 # C extensions
 *.so
 
