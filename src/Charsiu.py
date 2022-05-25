@@ -102,7 +102,7 @@ class charsiu_forced_aligner(charsiu_aligner):
 
         self._freeze_model()
 
-    def align(self, audio, text):
+    def align(self, audio, text, return_logits=False):
         '''
         Perform forced alignment
 
@@ -142,7 +142,10 @@ class charsiu_forced_aligner(charsiu_aligner):
         pred_phones = seq2duration(pred_phones, resolution=self.resolution)
 
         pred_words = self.charsiu_processor.align_words(pred_phones, phones, words)
-        return pred_phones, pred_words
+        if return_logits:
+            return pred_phones, pred_words, out.logits.detach().cpu().squeeze()
+        else:
+            return pred_phones, pred_words
 
     def serve(self, audio, text, save_to, output_format='textgrid'):
         '''
