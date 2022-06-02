@@ -9,6 +9,7 @@ child_speech_pretrained/
 *.TextGrid
 *.wav
 results*
+*.pkl
 *__pycache__*
 .~*
 # Data Files
