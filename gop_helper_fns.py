@@ -112,9 +112,14 @@ def get_aligner_frame_seq_len(audio_filepath, fs, charsiu):
     return charsiu.aligner._get_feat_extract_output_lengths(audio)
 
 
-def calculate_GOP_e2e(audio_filepath, transcript, charsiu_model=CHARSIU_MODEL, aligned_phones=None, phone_subset=None):
+def calculate_GOP_e2e(audio, transcript, charsiu_model=CHARSIU_MODEL, aligned_phones=None, phone_subset=None):
+
+    if type(audio) == str:
+        audio_signal, fs = sf.read(audio)
+    elif isinstance(audio, np.ndarray):
+        audio_signal = audio
+
     with torch.no_grad():
-        audio_signal, fs = sf.read(audio_filepath)
         phones, words, logits = charsiu_model.align(audio_signal, text=transcript, return_logits=True)
         aligned_phones = aligned_phones if aligned_phones is not None else phones
         aligned_phone_df = pd.DataFrame.from_records(aligned_phones, columns=['start', 'end', 'phone'])
