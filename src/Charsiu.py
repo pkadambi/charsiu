@@ -102,7 +102,7 @@ class charsiu_forced_aligner(charsiu_aligner):
 
         self._freeze_model()
 
-    def align(self, audio, text, return_logits=False):
+    def align(self, audio, text, return_logits=False, TEMPERATURE=1):
         '''
         Perform forced alignment
 
@@ -125,7 +125,7 @@ class charsiu_forced_aligner(charsiu_aligner):
 
         with torch.no_grad():
             out = self.aligner(audio)
-        cost = torch.softmax(out.logits, dim=-1).detach().cpu().numpy().squeeze()
+        cost = torch.softmax(out.logits/TEMPERATURE, dim=-1).detach().cpu().numpy().squeeze()
 
         sil_mask = self._get_sil_mask(cost)
 

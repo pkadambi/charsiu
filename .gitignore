@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 
 # Results and experiment directories
+src/__pycache__
 models_test*/
 charsiu_w2v2*/
 child_speech_pretrained/
@@ -15,7 +16,7 @@ results*
 # Data Files
 for_yan.csv
 phonation_data.csv
-
+pllrs.csv
 
 # C extensions
 *.so

@@ -30,7 +30,7 @@ def textgridpath_to_phonedf(txtgrid_path: str, phone_key: str, remove_numbers=Fa
     return phndf
 
 
-def extract_phone_df_from_textgrid(txtgrid: Textgrid, phone_key, remove_numbers=False):
+def extract_phone_df_from_textgrid(txtgrid: Textgrid, phone_key, remove_numbers=False, silchar='[SIL]', replace_SP=True):
     '''
         txtgrid - praatio textgrid
         phone_key - the key for the phonemes
@@ -43,7 +43,10 @@ def extract_phone_df_from_textgrid(txtgrid: Textgrid, phone_key, remove_numbers=
             _phone = re.sub(r'[0-9]+', '', _phone)
         phonedf.append([interval.start, interval.end, _phone])
 
-    phonedf = pd.DataFrame(phonedf)
+    phonedf = pd.DataFrame(phonedf, columns=['start', 'end', 'phone'])
+    phonedf = phonedf.replace('sil', '[SIL]')
+    if replace_SP:
+        phonedf = phonedf.replace('sp', '[SIL]')
     return phonedf
 
 
