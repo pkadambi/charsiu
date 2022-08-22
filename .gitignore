@@ -11,6 +11,8 @@ child_speech_pretrained/
 results*
 *__pycache__*
 .~*
+*.pkl
+pllrs.csv
 # Data Files
 for_yan.csv
 phonation_data.csv
