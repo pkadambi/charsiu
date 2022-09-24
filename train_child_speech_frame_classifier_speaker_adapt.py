@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-
+import pickle as pkl
 import re
 import transformers
 import soundfile as sf
@@ -9,20 +9,19 @@ import torch
 import json
 import numpy as np
 from alignment_helper_fns import *
-
+from transformers import Wav2Vec2Model, Wav2Vec2Config
+import torch.nn as nn
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 from g2p_en import G2p
 from datasets import load_dataset, load_metric, load_from_disk
-from transformers import Wav2Vec2CTCTokenizer
-from transformers import Wav2Vec2FeatureExtractor
+from src.models import Wav2Vec2ForFrameClassificationSAT
 from transformers import Trainer, TrainingArguments
-from transformers import Wav2Vec2Processor
-from transformers import Wav2Vec2ForCTC, Wav2Vec2Config
+from transformers import Wav2Vec2Processor, Wav2Vec2FeatureExtractor, Wav2Vec2CTCTokenizer, Wav2Vec2ForCTC, Wav2Vec2Config
 from transformers.modeling_outputs import CausalLMOutput, MaskedLMOutput
 import argparse
 from create_child_speech_dataset import *
-from src.Charsiu import charsiu_forced_aligner, charsiu_attention_aligner
+from src.Charsiu import charsiu_forced_aligner, charsiu_sat_forced_aligner, charsiu_attention_aligner
 # np.random.seed(42)
 parser = argparse.ArgumentParser()
 parser.add_argument('--mode', default='charsiu')
@@ -32,16 +31,17 @@ parser.add_argument('--model_output_dir', default='./child_speech_pretrained')
 parser.add_argument('--tokenizer_name', default='charsiu/tokenizer_en_cmu')
 parser.add_argument('--model_name', default='charsiu/en_w2v2_fc_10ms')
 # parser.add_argument('--results_dir', default='./results_frame_2epochs')
-parser.add_argument('--results_dir', default='./results_tmp')
+parser.add_argument('--results_dir', default='./results_sat')
 # parser.add_argument('--tokenizer_name', default='facebook/wav2vec2-base-960h')
 # parser.add_argument('--model_name', default='facebook/wav2vec2-base-960h')
 parser.add_argument('--filter_speaker_age', action='store_true')
 parser.add_argument('--filter_speaker_age_range', action='store_true')
 
-parser.add_argument('--dataset_dir', default='./data/child_speech_framewise')
+parser.add_argument('--dataset_dir', default='./data/child_speech_framewise_ivectors')
 parser.add_argument('--output_dir', default='./outputs')
 parser.add_argument('--device', default='cuda')
 # parser.add_argument('--')
+os.environ["WANDB_DISABLED"] = "true"
 args = parser.parse_args()
 audio_dir = args.audio_dir
 manual_textgrids_dir = args.manual_textgrids_dir
@@ -71,13 +71,17 @@ if args.results_dir is None:
         else:
             results_dir = os.path.join('./results', model_name.split('/')[-1], 'run_%d' % ii)
             ii+=1
-os.environ["WANDB_DISABLED"] = "true"
+
 ''' Load Data Paths '''
 unmatched_manual_textgrid_files = get_all_textgrids_in_directory(manual_textgrids_dir)
 
 manual_textgrid_files = []
+
+files_to_remove = '/home/prad/datasets/ChildSpeechDataset/child_speech_16_khz/0411_M_LM/0411_M_LMwT32.wav'
+
 audio_files = ['/'.join([audio_dir,_path.split('/')[-2], _path.split('/')[-1][:-8]+'wav'])
                for _path in unmatched_manual_textgrid_files]
+audio_files.remove(files_to_remove)
 ''' Load Models '''
 tokenizer = Wav2Vec2CTCTokenizer.from_pretrained(tokenizer_name)
 
@@ -115,7 +119,6 @@ def speaker_agewise_train_test_split(dataset, speaker_id, speaker_col='speaker_i
     return train_split, test_split
 def prepare_framewise_dataset(batch, mapping=mapping_phone2id):
     batch['input_values'] = batch['audio']
-
     batch['labels']  = []
     # for phone in batch['phone_alignments']['utterance']:
     #     batch['labels'].append(mapping[phone])
@@ -126,24 +129,23 @@ def prepare_framewise_dataset(batch, mapping=mapping_phone2id):
     return batch
 
 ''' Create dataset instance'''
-if not os.path.exists(dataset_dir):
-    print('Dataset not found at:\t', dataset_dir, '\nCreating and saving dataset')
-    csd = ChildSpeechDataset(audio_paths=audio_files)
-    child_speech_dataset = csd.return_as_datsets()
-    child_speech_dataset = child_speech_dataset.map(prepare_framewise_dataset)
-    child_speech_dataset.save_to_disk(dataset_dir)
-    unique_speakers = list(set(list(child_speech_dataset['speaker_id'])))
-    # train_dataset, loso_dataset = \
-    #         speakerwise_train_test_split(child_speech_dataset, speaker_id=unique_speakers[0])
-    # train_dataset.save_to_disk(dataset_dir+'_train')
-    # loso_dataset.save_to_disk(dataset_dir+'_loso')
-else:
-    print('Found dataset at:\t', dataset_dir, '\nLoading')
-    child_speech_dataset = load_from_disk(dataset_dir)
-    unique_speakers = list(set(list(child_speech_dataset['speaker_id'])))
-    # train_dataset = load_from_disk(dataset_dir+'_train')
-    # loso_dataset = load_from_disk(dataset_dir+'_loso')
-
+# if not os.path.exists(dataset_dir):
+#     print('Dataset not found at:\t', dataset_dir, '\nCreating and saving dataset')
+#     csd = ChildSpeechDataset(audio_paths=audio_files, sat_vectors_csvname='./child_speech_ivectors.csv')
+#     child_speech_dataset = csd.return_as_datsets()
+#     child_speech_dataset = child_speech_dataset.map(prepare_framewise_dataset)
+#     child_speech_dataset.save_to_disk(dataset_dir)
+#     unique_speakers = list(set(list(child_speech_dataset['speaker_id'])))
+#     # train_dataset, loso_dataset = \
+#     #         speakerwise_train_test_split(child_speech_dataset, speaker_id=unique_speakers[0])
+#     # train_dataset.save_to_disk(dataset_dir+'_train')
+#     # loso_dataset.save_to_disk(dataset_dir+'_loso')
+# else:
+#     print('Found dataset at:\t', dataset_dir, '\nLoading')
+#     child_speech_dataset = load_from_disk(dataset_dir)
+#     unique_speakers = list(set(list(child_speech_dataset['speaker_id'])))
+#     train_dataset = load_from_disk(dataset_dir+'_train')
+#     loso_dataset = load_from_disk(dataset_dir+'_loso')
 
 
 ''' Dataset preparation '''
@@ -221,9 +223,8 @@ class DataCollatorClassificationWithPadding:
     def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
         # split inputs and labels since they have to be of different lenghts and need
         # different padding methods
-        input_features = [{"input_values": feature["input_values"]} for feature in features]
+        input_features = [{"input_values": feature["input_values"], "ixvector": feature["ixvector"]} for feature in features]
         label_features = [{"input_ids": feature["labels"]} for feature in features]
-
         batch = self.processor.pad(
             input_features,
             padding=self.padding,
@@ -248,59 +249,6 @@ class DataCollatorClassificationWithPadding:
 
         return batch
 
-'''
-DO NOT REMOVE
-lines 247, 250 have been modified for training purposes
-'''
-class Wav2Vec2ForFrameClassification(Wav2Vec2ForCTC):
-
-    def forward(
-            self,
-            input_values,
-            attention_mask=None,
-            output_attentions=None,
-            output_hidden_states=None,
-            return_dict=None,
-            labels=None,
-    ):
-
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        outputs = self.wav2vec2(
-            input_values,
-            attention_mask=attention_mask,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
-        )
-
-        hidden_states = outputs[0]
-        hidden_states = self.dropout(hidden_states)
-
-        logits = self.lm_head(hidden_states)
-        timesteps = logits.shape[1]
-        loss = None
-        if labels is not None:
-            labels = labels[:,:timesteps]
-            if labels.max() >= self.config.vocab_size:
-                raise ValueError(f"Label values must be <= vocab_size: {self.config.vocab_size}")
-
-            # retrieve loss input_lengths from attention_mask
-            attention_mask = (
-                attention_mask if attention_mask is not None else torch.ones_like(input_values, dtype=torch.long)
-            )
-            input_lengths = self._get_feat_extract_output_lengths(attention_mask.sum(-1)).to(torch.long)
-
-            loss = torch.nn.functional.cross_entropy(logits.view(-1, logits.size(2)), labels.flatten(),
-                                                     reduction="mean")
-
-        if not return_dict:
-            output = (logits,) + outputs[2:]
-            return ((loss,) + output) if loss is not None else output
-
-        return CausalLMOutput(
-            loss=loss, logits=logits, hidden_states=outputs.hidden_states, attentions=outputs.attentions
-        )
 
 
 def compute_metrics(pred):
@@ -342,15 +290,27 @@ def write_textgrid_alignments_for_speaker(charsiu_aligner, loso_dataset, output_
     audiofiles = loso_dataset['file']
     transcripts = loso_dataset['sentence']
     speaker_id = loso_dataset['speaker_id'][0]
+    output_tg_dir = os.path.join(output_dir, speaker_id)
+
+    if 'ixvector' in loso_dataset.features.keys():
+        ixvector = loso_dataset['ixvector']
+    else:
+        ixvector = None
+
+
     print('Generating Alignments...')
+    print('Writing alignments to directory:\t', output_tg_dir)
     for ii, audiofilepath in tqdm.tqdm(enumerate(audiofiles)):
         file_id = loso_dataset['id'][ii]
-        output_tg_path = os.path.join(output_dir, speaker_id, file_id+'.TextGrid')
-        output_tg_dir = os.path.join(output_dir, speaker_id)
+        output_tg_path = os.path.join(output_tg_dir, file_id+'.TextGrid')
         if not os.path.exists(output_tg_dir):
             os.makedirs(output_tg_dir, exist_ok=True)
         try:
-            charsiu_aligner.serve(audio = audiofilepath, text=transcripts[ii], save_to = output_tg_path)
+            if ixvector is not None and type(charsiu_aligner)==charsiu_sat_forced_aligner:
+                charsiu_aligner.serve(audio=audiofilepath, text=transcripts[ii], save_to=output_tg_path, ixvector=ixvector[ii])
+            else:
+                charsiu_aligner.serve(audio=audiofilepath, text=transcripts[ii], save_to=output_tg_path)
+
         except:
             print('Error could not generate alignment for file:', audiofilepath)
 
@@ -359,27 +319,36 @@ if __name__ == "__main__":
     # index =
     # Remove the following file: /home/prad/datasets/ChildSpeechDataset/child_speech_16_khz/0411_M_LM/0411_M_LMwT32.wav
     # because it is detected as empty and causes an error for the aligner's DTW function
-    child_speech_dataset = load_from_disk(dataset_dir)
-    file_to_remove = '/home/prad/datasets/ChildSpeechDataset/child_speech_16_khz/0411_M_LM/0411_M_LMwT32.wav'
-    child_speech_dataset = child_speech_dataset.filter(lambda example: file_to_remove not in example)
+    csd = ChildSpeechDataset(audio_paths=audio_files, sat_vectors_csvname='./child_speech_ivectors.csv')
+    child_speech_dataset = csd.return_as_datsets()
+    child_speech_dataset = child_speech_dataset.map(prepare_framewise_dataset)
     unique_speakers = list(set(list(child_speech_dataset['speaker_id'])))
+
+    file_to_remove = '/home/prad/datasets/ChildSpeechDataset/child_speech_16_khz/0411_M_LM/0411_M_LMwT32.wav'
+    # child_speech_dataset = child_speech_dataset.filter(lambda example: file_to_remove not in example)
     speaker_wise_results = pd.DataFrame(index=unique_speakers)
 
     completed_speakers = [x[0].split('/')[-1] for x in os.walk(results_dir)]
     speakers_to_run = list(set(unique_speakers) - set(completed_speakers))
     np.random.seed(1337)
-    for jj, loso_speaker_id in enumerate(unique_speakers):
-        loso_speaker_id = '0506_F_LH'
+
+    for jj, loso_speaker_id in enumerate(speakers_to_run):
+        loso_speaker_id = '605_M_CT'
+        # loso_speaker_id = '0500_M_WD'
+
         print('-------------------------------------------------------------------------------------------------------')
         print('************************************ Started Training for Speaker *************************************')
-        print('\n\n+++++++++++++++++ Speaker %s (%d/%d)+++++++++++++++++' % (loso_speaker_id, jj, len(unique_speakers)))
+        print('\n\n+++++++++++++++++ Speaker %s (%d/%d)+++++++++++++++++' % (loso_speaker_id, jj, len(speakers_to_run)))
 
-        train_dataset, loso_dataset = get_loso_dataset(leave_out_speaker_id=loso_speaker_id,
-                                                       dataset=child_speech_dataset,
-                                                       dataset_prep_fn=prepare_framewise_dataset,
-                                                       age_range=FILTER_AGE_RANGE,
-                                                       age_restrict=FILTER_AGE)
+        # train_dataset, loso_dataset = get_loso_dataset(leave_out_speaker_id=loso_speaker_id,
+        #                                                dataset=child_speech_dataset,
+        #                                                dataset_prep_fn=prepare_framewise_dataset,
+        #                                                age_range=FILTER_AGE_RANGE,
+        #                                                age_restrict=FILTER_AGE)
 
+        loso_dataset = child_speech_dataset.filter(lambda example: loso_speaker_id in example['speaker_id'])
+        train_dataset = child_speech_dataset.filter(lambda example: loso_speaker_id not in example['speaker_id'])
+        sat_config = pkl.load(open('./sat_model_config.pkl', 'rb'))
         frameshift = 10
         # processes the audio
         feature_extractor = Wav2Vec2FeatureExtractor(feature_size=1, sampling_rate=16000, padding_value=0.0,
@@ -391,7 +360,7 @@ if __name__ == "__main__":
         data_collator = DataCollatorClassificationWithPadding(processor=processor, padding=True)
 
         if mode == 'base':
-            model = Wav2Vec2ForFrameClassification.from_pretrained(
+            model = Wav2Vec2ForFrameClassificationSAT.from_pretrained(
                 "facebook/wav2vec2-base",
                 gradient_checkpointing=True,
                 pad_token_id=processor.tokenizer.pad_token_id,
@@ -399,7 +368,7 @@ if __name__ == "__main__":
             )
 
         elif mode == 'charsiu':
-            model = Wav2Vec2ForFrameClassification.from_pretrained(
+            model = Wav2Vec2ForFrameClassificationSAT.from_pretrained(
                 model_name,
                 gradient_checkpointing=True,
                 pad_token_id=processor.tokenizer.pad_token_id,
@@ -419,10 +388,10 @@ if __name__ == "__main__":
             per_device_eval_batch_size=4,
             gradient_accumulation_steps=8,
             evaluation_strategy="steps",
-            num_train_epochs=5,
+            num_train_epochs=15,
             fp16=True,
             save_steps=500,
-            eval_steps=50,
+            eval_steps=200,
             logging_steps=100,
             learning_rate=3e-4,
             weight_decay=0.0001,
@@ -448,14 +417,17 @@ if __name__ == "__main__":
         charsiu.aligner = model #update the aligner with the trained model
         loso_manual_textgrids = [tgpath for tgpath in unmatched_manual_textgrid_files
                                  if loso_speaker_id in tgpath]
-        loso_estimated_textgrids = [os.path.join(results_dir, tgpath.split('/')[-2], tgpath.split('/')[-1])
+        loso_estimated_textgrids_pretrained = [os.path.join(results_dir, tgpath.split('/')[-2], tgpath.split('/')[-1])
                                     for tgpath in unmatched_manual_textgrid_files if loso_speaker_id in tgpath]
-
+        loso_estimated_textgrids_finetuned = [os.path.join(results_dir, tgpath.split('/')[-2], tgpath.split('/')[-1])
+                                               for tgpath in unmatched_manual_textgrid_files if
+                                               loso_speaker_id in tgpath]
         ''' Evaluate pretrained results'''
         charsiu = charsiu_forced_aligner(model_name)
         write_textgrid_alignments_for_speaker(charsiu_aligner=charsiu, loso_dataset=loso_dataset, output_dir=results_dir)
         del charsiu
-        pt_acc, pt_numcorrect, pt_numpredicted = calc_accuracy_between_textgrid_lists(loso_manual_textgrids, loso_estimated_textgrids)
+        pt_acc, pt_numcorrect, pt_numpredicted = calc_accuracy_between_textgrid_lists(loso_manual_textgrids,
+                                                                                      loso_estimated_textgrids_pretrained)
         rslts_pt = trainer.evaluate(loso_dataset)
         print(rslts_pt)
         speaker_wise_results.loc[loso_speaker_id, 'NumPhonesPredicted_PT'] = pt_numpredicted
@@ -464,18 +436,23 @@ if __name__ == "__main__":
         speaker_wise_results.loc[loso_speaker_id, 'FramewisePER_PT'] = rslts_pt['eval_phone_accuracy']
         speaker_wise_results.loc[loso_speaker_id, 'EvalLoss_PT'] = rslts_pt['eval_loss']
 
-        model_path = './framewise_models/' + loso_speaker_id
+        # trainer.train()
+        model_path = './sat_ivector_models/' + loso_speaker_id
         if not os.path.exists(model_path):
+            print('No Model Found, training model')
             trainer.train()
             trainer.save_model(model_path)
-
+        # trainer.save_model(model_path)
+        # charsiu.serve(audio=loso_dataset['file'][0], text=loso_dataset['sentence'][0], save_to=os.path.join(results_dir, loso_dataset['speaker_id'][0], loso_dataset['id'][0] + '.TextGrid'), ixvector=loso_dataset['ixvector'][0])
         '''evaluate finetuned results'''
         # speaker_wise_results[unique_speakers[0]]
-        charsiu = charsiu_forced_aligner(model_path)
+        charsiu = charsiu_sat_forced_aligner(model_path)
         charsiu.aligner = model
         write_textgrid_alignments_for_speaker(charsiu_aligner=charsiu, loso_dataset=loso_dataset,
                                               output_dir=results_dir)
-        ft_acc, ft_numcorrect, ft_numpredicted = calc_accuracy_between_textgrid_lists(loso_manual_textgrids, loso_estimated_textgrids)
+        del charsiu
+        ft_acc, ft_numcorrect, ft_numpredicted = calc_accuracy_between_textgrid_lists(loso_manual_textgrids,
+                                                                                      loso_estimated_textgrids_finetuned)
         rslts_ft = trainer.evaluate(loso_dataset)
         speaker_wise_results.loc[loso_speaker_id, 'NumPhonesPredicted_FT'] = ft_numcorrect
         speaker_wise_results.loc[loso_speaker_id, 'NumCorrectPhones_FT'] = ft_numcorrect
@@ -493,7 +470,12 @@ if __name__ == "__main__":
 
         print('Pretrained Eval Loss:\t', rslts_pt['eval_loss'])
         print('Fineuned Eval Loss:\t', rslts_ft['eval_loss'])
-        speaker_wise_results.to_csv(os.path.join(results_dir, 'tmp_results.csv'))
+        speaker_wise_results.to_csv(os.path.join(results_dir, '%s_results.csv' % loso_speaker_id))
 
+        #reset dataset for next run (not saving this due to cache bug)
+        csd = ChildSpeechDataset(audio_paths=audio_files, sat_vectors_csvname='./child_speech_ivectors.csv')
+        child_speech_dataset = csd.return_as_datsets()
+        child_speech_dataset = child_speech_dataset.map(prepare_framewise_dataset)
+        exit()
     speaker_wise_results.to_csv(os.path.join(results_dir, 'results.csv'))
 

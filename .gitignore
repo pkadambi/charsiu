@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 
 # Results and experiment directories
+child_speech_ivectors.csv
+framewise_models/
+sat_ivector_models/
+tmp_model/
+wandb/
 models_test*/
 charsiu_w2v2*/
 child_speech_pretrained/
