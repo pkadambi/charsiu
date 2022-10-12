@@ -2,19 +2,35 @@ import pandas as pd
 import numpy as np
 from praatio.data_classes.textgrid import Textgrid
 from praatio import textgrid
+from phoneme_info import *
 import tqdm
 import re
 import os
 
-def get_all_textgrids_in_directory(directory):
+def get_english_phone_list():
+    return ENGLISH_PHONEME_LIST
+
+def get_phoneme_info_df():
+    return PHONEME_INFO_DF
+
+def get_all_textgrids_in_directory(directory, verbose=True):
     textgrid_files = []
-    print('Extracting all textgrids in directory:\t', directory)
-    for ii, (path, subdirs, files) in tqdm.tqdm(enumerate(os.walk(directory))):
-        for name in files:
-            if 'TextGrid' in name:
-                _textgridfile = os.path.join(path, name)
-                textgrid_files.append(_textgridfile)
-                # print(_textgridfile)
+    if verbose:
+        print('Extracting all textgrids in directory:\t', directory)
+
+    if verbose:
+        for ii, (path, subdirs, files) in tqdm.tqdm(enumerate(os.walk(directory))):
+            for name in files:
+                if 'TextGrid' in name:
+                    _textgridfile = os.path.join(path, name)
+                    textgrid_files.append(_textgridfile)
+    else:
+        for ii, (path, subdirs, files) in enumerate(os.walk(directory)):
+            for name in files:
+                if 'TextGrid' in name:
+                    _textgridfile = os.path.join(path, name)
+                    textgrid_files.append(_textgridfile)
+
     return textgrid_files
 
 def textgridpath_to_phonedf(txtgrid_path: str, phone_key: str, remove_numbers=False, replace_silence=True):
@@ -55,6 +71,15 @@ def extract_phone_df_from_textgrid(txtgrid: Textgrid, phone_key, remove_numbers=
 Accuracy calculation function
 
 '''
+def unique_phonemes_in_tgs(tglist, phone_key, remove_numbers):
+    allphones = []
+
+    for tg in tglist:
+        tgdf = textgridpath_to_phonedf(tg, phone_key, remove_numbers)
+        allphones.extend(list(tgdf.iloc[:, 2].values))
+
+    return list(np.unique(allphones))
+
 def calc_accuracy(predphn_df, annotated_midpoints_dict, ignore_extras=False):
     correct_preds = []
 
@@ -137,8 +162,11 @@ def calc_alignment_accuracy_between_textgrids(manual_textgridpath: str, aligner_
     return correct_indicator
 
 def calc_accuracy_between_textgrid_lists(manual_textgrid_list, estimated_textgrid_list, manual_phonekey='ha phones',
-                                         aligner_phonekey='phones', ignore_extras=True, ignore_silence=False):
-    print('Caclulating alignment accuracy...')
+                                         aligner_phonekey='phones', ignore_extras=True, ignore_silence=False,
+                                         verbose=True):
+    if verbose:
+        print('Caclulating alignment accuracy...')
+
     phoneme_correct_indicator = []
     for ii, (manual_textgridpath, estimated_textgridpath) in tqdm.tqdm(enumerate(zip(manual_textgrid_list, estimated_textgrid_list))):
         try:
@@ -157,9 +185,9 @@ def calc_accuracy_between_textgrid_lists(manual_textgrid_list, estimated_textgri
     acc = np.mean(phoneme_correct_indicator)
     numcorrect = np.sum(phoneme_correct_indicator)
     numpredicted = len(phoneme_correct_indicator)
-
-    print('Accuracy Excluding Extra Phonemes')
-    print('Accuracy:\t', np.mean(phoneme_correct_indicator))
-    print('Num Correct:\t', numcorrect)
-    print('Num Predicted Phones:\t', numpredicted)
+    if verbose:
+        print('Accuracy Excluding Extra Phonemes')
+        print('Accuracy:\t', np.mean(phoneme_correct_indicator))
+        print('Num Correct:\t', numcorrect)
+        print('Num Predicted Phones:\t', numpredicted)
     return acc, numcorrect, numpredicted

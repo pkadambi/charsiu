@@ -9,7 +9,7 @@ from itertools import groupby
 sys.path.append('src/')
 import numpy as np
 # sys.path.insert(0,'src')
-from models import Wav2Vec2ForAttentionAlignment, Wav2Vec2ForFrameClassification, Wav2Vec2ForCTC
+from models import Wav2Vec2ForAttentionAlignment, Wav2Vec2ForFrameClassification, Wav2Vec2ForCTC, Wav2Vec2ForFrameClassificationSAT
 from utils import seq2duration, forced_align, duration2textgrid, word2textgrid
 from processors import CharsiuPreprocessor_zh, CharsiuPreprocessor_en
 
@@ -228,6 +228,141 @@ class charsiu_forced_aligner(charsiu_aligner):
 
         return np.array(sil_mask)
 
+
+class charsiu_sat_forced_aligner(charsiu_aligner):
+    def __init__(self, aligner, ixvector_size, sil_threshold=4, **kwargs):
+        super(charsiu_sat_forced_aligner, self).__init__(**kwargs)
+        self.aligner = Wav2Vec2ForFrameClassificationSAT.from_pretrained(aligner, ivector_size=ixvector_size)
+        self.sil_threshold = sil_threshold
+        self._freeze_model()
+
+    def align(self, audio, text, ixvector):
+        '''
+        Perform forced alignment
+
+        Parameters
+        ----------
+        audio : np.ndarray [shape=(n,)]
+            time series of speech signal
+        text : str
+            The transcription
+
+        Returns
+        -------
+        A tuple of aligned phones in the form (start_time, end_time, phone)
+
+        '''
+        # audio = self.charsiu_processor.audio_preprocess(audio, sr=self.sr)
+        # audio = torch.Tensor(audio).unsqueeze(0).to(self.device)
+
+
+        audio = self.charsiu_processor.audio_preprocess(audio, sr=self.sr)
+        audio = torch.Tensor(audio).unsqueeze(0).to(self.device)
+        ixvector = torch.Tensor(ixvector).unsqueeze(0).to(self.device)
+        phones, words = self.charsiu_processor.get_phones_and_words(text)
+        phone_ids = self.charsiu_processor.get_phone_ids(phones)
+
+        with torch.no_grad():
+            out = self.aligner(input_values=audio, ixvector=ixvector)
+        cost = torch.softmax(out.logits, dim=-1).detach().cpu().numpy().squeeze()
+
+        sil_mask = self._get_sil_mask(cost)
+
+        nonsil_idx = np.argwhere(sil_mask != self.charsiu_processor.sil_idx).squeeze()
+        if nonsil_idx is None:
+            raise Exception("No speech detected! Please check the audio file!")
+
+        aligned_phone_ids = forced_align(cost[nonsil_idx, :], phone_ids[1:-1])
+
+        aligned_phones = [self.charsiu_processor.mapping_id2phone(phone_ids[1:-1][i]) for i in aligned_phone_ids]
+
+        pred_phones = self._merge_silence(aligned_phones, sil_mask)
+
+        pred_phones = seq2duration(pred_phones, resolution=self.resolution)
+
+        pred_words = self.charsiu_processor.align_words(pred_phones, phones, words)
+        return pred_phones, pred_words
+
+    def serve(self, audio, text, ixvector, save_to, output_format='textgrid', verbose=False):
+        '''
+         A wrapper function for quick inference
+
+        Parameters
+        ----------
+        audio : TYPE
+            DESCRIPTION.
+        text : TYPE, optional
+            DESCRIPTION. The default is None.
+        output_format : str, optional
+            Output phone-taudio alignment as a "tsv" or "textgrid" file.
+            The default is 'textgrid'.
+
+        Returns
+        -------
+        None.
+
+        '''
+        phones, words = self.align(audio, text, ixvector)
+
+        if output_format == 'tsv':
+            if save_to.endswith('.tsv'):
+                save_to_phone = save_to.replace('.tsv', '_phone.tsv')
+                save_to_word = save_to.replace('.tsv', '_word.tsv')
+            else:
+                save_to_phone = save_to + '_phone.tsv'
+                save_to_word = save_to + '_word.tsv'
+
+            self._to_tsv(phones, save_to_phone)
+            self._to_tsv(words, save_to_word)
+
+        elif output_format == 'textgrid':
+            self._to_textgrid(phones, words, save_to)
+        else:
+            raise Exception('Please specify the correct output format (tsv or textgird)!')
+
+    def _to_textgrid(self, phones, words, save_to):
+        '''
+        Convert output tuples to a textgrid file
+
+        Parameters
+        ----------
+        phones : TYPE
+            DESCRIPTION.
+
+        Returns
+        -------
+        None.
+
+        '''
+        word2textgrid(phones, words, save_path=save_to)
+        # print('Alignment output has been saved to %s'%(save_to))
+
+    def _get_sil_mask(self, cost):
+        # single out silent intervals
+
+        preds = np.argmax(cost, axis=-1)
+        sil_mask = []
+        for key, group in groupby(preds):
+            group = list(group)
+            if (key == self.charsiu_processor.sil_idx and len(group) < self.sil_threshold):
+                sil_mask += [-1 for i in range(len(group))]
+            else:
+                sil_mask += group
+
+        return np.array(sil_mask)
+
+    def _merge_silence(self, aligned_phones, sil_mask):
+        # merge silent and non-silent intervals
+        pred_phones = []
+        count = 0
+        for i in sil_mask:
+            if i == self.charsiu_processor.sil_idx:
+                pred_phones.append('[SIL]')
+            else:
+                pred_phones.append(aligned_phones[count])
+                count += 1
+        assert len(pred_phones) == len(sil_mask)
+        return pred_phones
 
 class charsiu_attention_aligner(charsiu_aligner):
 

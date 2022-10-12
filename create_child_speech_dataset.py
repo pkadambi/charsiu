@@ -8,7 +8,7 @@ from datasets import Dataset, DatasetDict
 
 
 class ChildSpeechDataset(torch.utils.data.Dataset):
-    def __init__(self, audio_paths: list):
+    def __init__(self, audio_paths: list, sat_vectors_csvname=None):
         self.audio_paths = audio_paths
 
         # Extract Audios
@@ -29,7 +29,29 @@ class ChildSpeechDataset(torch.utils.data.Dataset):
         #step3: extract frame labels
         print('Extracting Framewise Labels')
         self.frame_phn_labels, self.frame_times = self.gen_frame_labels_from_alignment()
-        pass
+
+        if sat_vectors_csvname is not None:
+            print('Extracting SAT Vectors')
+            sat_df = pd.read_csv(sat_vectors_csvname)
+            self.ixvectors = [np.array(sat_df[sat_df['Filename'] == _path].values[0][1:]).astype('float') for _path in self.audio_paths]
+
+            # df processing steps for xvector
+            # xvecs = []
+            # xvecs_proj = []
+            # # xvecs = np.zeros([len(self.audios), 512])
+            # # xvecs_proj = np.zeros([len(self.audios), 128])
+            # file_ids = sat_df.iloc[1:, 0].values
+            # for ii in range(len(file_ids)):
+            #     # xvecs[idx, :] = np.array(sat_df.iloc[idx, 2:514].values).astype('float').reshape(1, -1)
+            #     # xvecs_proj[idx, : ] = np.array(sat_df.iloc[idx, 514:].values).astype('float').reshape(1, -1)
+            #     xvecs.append(np.array(sat_df.iloc[ii+1, 2:514].values).astype('float').reshape(1, -1))
+            #     xvecs_proj.append(np.array(sat_df.iloc[ii+1, 514:].values).astype('float').reshape(1, -1))
+        else:
+            self.ixvectors = [None for _path in self.audio_paths]
+
+        print(' ')
+
+
         # assumes that the directory is in the file
     def extract_text_transcript(self, path):
         transcript_path = path.split('.')[0] + '.lab'
@@ -126,7 +148,7 @@ class ChildSpeechDataset(torch.utils.data.Dataset):
         dct = DatasetDict({'file': self.audio_paths, 'audio':self.audios, 'phone_alignments': self.phone_alignments,
                'word_alignments': self.word_alignments, 'speaker_id': self.speaker_ids, 'audio_len': self.audio_lens,
                            'id': self.ids, 'sentence': self.text_transcripts, 'frame_phones': self.frame_phn_labels,
-                           'frame_times': self.frame_times})
+                           'frame_times': self.frame_times, 'ixvector': self.ixvectors})
         return dct
 
     def return_as_datsets(self):
