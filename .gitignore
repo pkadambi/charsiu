@@ -105,3 +105,16 @@ target/
 
 # Mypy cache
 .mypy_cache/
+accuracy_results_ft_and_sat_methods.csv
+child_speech_ivectors.csv
+extracted_xvectors.csv
+extracted_xvectors_libri.csv
+extracted_xvectors_proj_libri.csv
+framewise_models/
+sat_ivector_models/
+sat_results_ivectors.csv
+sat_xvector_proj_models/
+tmp_model/
+wandb/
+xvector_df.csv
+xvector_proj_df.csv
