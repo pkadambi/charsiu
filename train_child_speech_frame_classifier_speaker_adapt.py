@@ -18,7 +18,6 @@ from datasets import load_dataset, load_metric, load_from_disk
 from src.models import Wav2Vec2ForFrameClassificationSAT
 from transformers import Trainer, TrainingArguments
 from transformers import Wav2Vec2Processor, Wav2Vec2FeatureExtractor, Wav2Vec2CTCTokenizer, Wav2Vec2ForCTC, Wav2Vec2Config
-from transformers.modeling_outputs import CausalLMOutput, MaskedLMOutput
 import argparse
 from create_child_speech_dataset import *
 from src.Charsiu import charsiu_forced_aligner, charsiu_sat_forced_aligner, charsiu_attention_aligner
@@ -26,23 +25,26 @@ from src.Charsiu import charsiu_forced_aligner, charsiu_sat_forced_aligner, char
 parser = argparse.ArgumentParser()
 parser.add_argument('--mode', default='charsiu')
 parser.add_argument('--audio_dir', default='/home/prad/datasets/ChildSpeechDataset/child_speech_16_khz')
+parser.add_argument('--results_csvpath', default='./results_xvector_proj.csv')
 parser.add_argument('--manual_textgrids_dir', default='/home/prad/datasets/ChildSpeechDataset/manually-aligned-text-grids/')
+parser.add_argument('--sat_vectors_csvpath', default='./extracted_xvectors_proj_libri.csv')
 parser.add_argument('--model_output_dir', default='./child_speech_pretrained')
 parser.add_argument('--tokenizer_name', default='charsiu/tokenizer_en_cmu')
 parser.add_argument('--model_name', default='charsiu/en_w2v2_fc_10ms')
 # parser.add_argument('--results_dir', default='./results_frame_2epochs')
-parser.add_argument('--results_dir', default='./results_sat')
+parser.add_argument('--results_dir', default='./results_sat_xvector')
 # parser.add_argument('--tokenizer_name', default='facebook/wav2vec2-base-960h')
 # parser.add_argument('--model_name', default='facebook/wav2vec2-base-960h')
 parser.add_argument('--filter_speaker_age', action='store_true')
 parser.add_argument('--filter_speaker_age_range', action='store_true')
 
-parser.add_argument('--dataset_dir', default='./data/child_speech_framewise_ivectors')
+parser.add_argument('--dataset_dir', default='./data/child_speech_framewise_xvectors_proj')
 parser.add_argument('--output_dir', default='./outputs')
 parser.add_argument('--device', default='cuda')
 # parser.add_argument('--')
 os.environ["WANDB_DISABLED"] = "true"
 args = parser.parse_args()
+SAT_VECTORS_CSVPATH = args.sat_vectors_csvpath
 audio_dir = args.audio_dir
 manual_textgrids_dir = args.manual_textgrids_dir
 output_dir = args.model_output_dir
@@ -319,22 +321,29 @@ if __name__ == "__main__":
     # index =
     # Remove the following file: /home/prad/datasets/ChildSpeechDataset/child_speech_16_khz/0411_M_LM/0411_M_LMwT32.wav
     # because it is detected as empty and causes an error for the aligner's DTW function
-    csd = ChildSpeechDataset(audio_paths=audio_files, sat_vectors_csvname='./child_speech_ivectors.csv')
+    # csd = ChildSpeechDataset(audio_paths=audio_files, sat_vectors_csvname='./child_speech_ivectors.csv')
+    csd = ChildSpeechDataset(audio_paths=audio_files, sat_vectors_csvname=SAT_VECTORS_CSVPATH)
     child_speech_dataset = csd.return_as_datsets()
     child_speech_dataset = child_speech_dataset.map(prepare_framewise_dataset)
+    SATVECTOR_SIZE = len(child_speech_dataset['ixvector'][0])
+    print('Finished dataset generation')
     unique_speakers = list(set(list(child_speech_dataset['speaker_id'])))
 
-    file_to_remove = '/home/prad/datasets/ChildSpeechDataset/child_speech_16_khz/0411_M_LM/0411_M_LMwT32.wav'
+    # file_to_remove = '/home/prad/datasets/ChildSpeechDataset/child_speech_16_khz/0411_M_LM/0411_M_LMwT32.wav'
     # child_speech_dataset = child_speech_dataset.filter(lambda example: file_to_remove not in example)
     speaker_wise_results = pd.DataFrame(index=unique_speakers)
 
     completed_speakers = [x[0].split('/')[-1] for x in os.walk(results_dir)]
+    completed_speakers.remove(''.join(results_dir.split('/')[1:]))
+    print('Results in directory %s found for %d/%d speakers' %
+          (results_dir, len(completed_speakers), len(unique_speakers)))
+
     speakers_to_run = list(set(unique_speakers) - set(completed_speakers))
+    print('Running on %d speakers' % len(speakers_to_run))
     np.random.seed(1337)
 
+    print('starting training loop')
     for jj, loso_speaker_id in enumerate(speakers_to_run):
-        loso_speaker_id = '605_M_CT'
-        # loso_speaker_id = '0500_M_WD'
 
         print('-------------------------------------------------------------------------------------------------------')
         print('************************************ Started Training for Speaker *************************************')
@@ -348,7 +357,7 @@ if __name__ == "__main__":
 
         loso_dataset = child_speech_dataset.filter(lambda example: loso_speaker_id in example['speaker_id'])
         train_dataset = child_speech_dataset.filter(lambda example: loso_speaker_id not in example['speaker_id'])
-        sat_config = pkl.load(open('./sat_model_config.pkl', 'rb'))
+        # sat_config = pkl.load(open('./sat_model_config.pkl', 'rb'))
         frameshift = 10
         # processes the audio
         feature_extractor = Wav2Vec2FeatureExtractor(feature_size=1, sampling_rate=16000, padding_value=0.0,
@@ -364,7 +373,8 @@ if __name__ == "__main__":
                 "facebook/wav2vec2-base",
                 gradient_checkpointing=True,
                 pad_token_id=processor.tokenizer.pad_token_id,
-                vocab_size=len(processor.tokenizer)
+                vocab_size=len(processor.tokenizer),
+                ivector_size = SATVECTOR_SIZE
             )
 
         elif mode == 'charsiu':
@@ -372,7 +382,8 @@ if __name__ == "__main__":
                 model_name,
                 gradient_checkpointing=True,
                 pad_token_id=processor.tokenizer.pad_token_id,
-                vocab_size=len(processor.tokenizer.decoder)
+                vocab_size=len(processor.tokenizer.decoder),
+                ivector_size=SATVECTOR_SIZE
             )
         # freeze convolutional layers and set the stride of the last conv layer to 1
         # this increase the sampling frequency to 98 Hz
@@ -391,7 +402,7 @@ if __name__ == "__main__":
             num_train_epochs=15,
             fp16=True,
             save_steps=500,
-            eval_steps=200,
+            eval_steps=500,
             logging_steps=100,
             learning_rate=3e-4,
             weight_decay=0.0001,
@@ -437,7 +448,7 @@ if __name__ == "__main__":
         speaker_wise_results.loc[loso_speaker_id, 'EvalLoss_PT'] = rslts_pt['eval_loss']
 
         # trainer.train()
-        model_path = './sat_ivector_models/' + loso_speaker_id
+        model_path = './sat_xvector_proj_models/' + loso_speaker_id
         if not os.path.exists(model_path):
             print('No Model Found, training model')
             trainer.train()
@@ -446,7 +457,7 @@ if __name__ == "__main__":
         # charsiu.serve(audio=loso_dataset['file'][0], text=loso_dataset['sentence'][0], save_to=os.path.join(results_dir, loso_dataset['speaker_id'][0], loso_dataset['id'][0] + '.TextGrid'), ixvector=loso_dataset['ixvector'][0])
         '''evaluate finetuned results'''
         # speaker_wise_results[unique_speakers[0]]
-        charsiu = charsiu_sat_forced_aligner(model_path)
+        charsiu = charsiu_sat_forced_aligner(model_path, ixvector_size=SATVECTOR_SIZE)
         charsiu.aligner = model
         write_textgrid_alignments_for_speaker(charsiu_aligner=charsiu, loso_dataset=loso_dataset,
                                               output_dir=results_dir)
@@ -473,9 +484,9 @@ if __name__ == "__main__":
         speaker_wise_results.to_csv(os.path.join(results_dir, '%s_results.csv' % loso_speaker_id))
 
         #reset dataset for next run (not saving this due to cache bug)
-        csd = ChildSpeechDataset(audio_paths=audio_files, sat_vectors_csvname='./child_speech_ivectors.csv')
+        csd = ChildSpeechDataset(audio_paths=audio_files, sat_vectors_csvname=SAT_VECTORS_CSVPATH)
         child_speech_dataset = csd.return_as_datsets()
         child_speech_dataset = child_speech_dataset.map(prepare_framewise_dataset)
-        exit()
-    speaker_wise_results.to_csv(os.path.join(results_dir, 'results.csv'))
+
+    speaker_wise_results.to_csv(os.path.join(results_dir, args.results_csvpath))
 

@@ -33,7 +33,19 @@ class ChildSpeechDataset(torch.utils.data.Dataset):
         if sat_vectors_csvname is not None:
             print('Extracting SAT Vectors')
             sat_df = pd.read_csv(sat_vectors_csvname)
-            self.ixvectors = [sat_df[sat_df['Filename'] == _path].values[0][1:].astype('float') for _path in self.audio_paths]
+            self.ixvectors = [np.array(sat_df[sat_df['Filename'] == _path].values[0][1:]).astype('float') for _path in self.audio_paths]
+
+            # df processing steps for xvector
+            # xvecs = []
+            # xvecs_proj = []
+            # # xvecs = np.zeros([len(self.audios), 512])
+            # # xvecs_proj = np.zeros([len(self.audios), 128])
+            # file_ids = sat_df.iloc[1:, 0].values
+            # for ii in range(len(file_ids)):
+            #     # xvecs[idx, :] = np.array(sat_df.iloc[idx, 2:514].values).astype('float').reshape(1, -1)
+            #     # xvecs_proj[idx, : ] = np.array(sat_df.iloc[idx, 514:].values).astype('float').reshape(1, -1)
+            #     xvecs.append(np.array(sat_df.iloc[ii+1, 2:514].values).astype('float').reshape(1, -1))
+            #     xvecs_proj.append(np.array(sat_df.iloc[ii+1, 514:].values).astype('float').reshape(1, -1))
         else:
             self.ixvectors = [None for _path in self.audio_paths]
 
