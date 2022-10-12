@@ -369,7 +369,7 @@ if __name__ == "__main__":
     speakers_to_run = list(set(unique_speakers) - set(completed_speakers))
     np.random.seed(1337)
     for jj, loso_speaker_id in enumerate(unique_speakers):
-        # loso_speaker_id = '0309_F_LB'
+        loso_speaker_id = '0506_F_LH'
         print('-------------------------------------------------------------------------------------------------------')
         print('************************************ Started Training for Speaker *************************************')
         print('\n\n+++++++++++++++++ Speaker %s (%d/%d)+++++++++++++++++' % (loso_speaker_id, jj, len(unique_speakers)))
@@ -419,10 +419,10 @@ if __name__ == "__main__":
             per_device_eval_batch_size=4,
             gradient_accumulation_steps=8,
             evaluation_strategy="steps",
-            num_train_epochs=2,
+            num_train_epochs=5,
             fp16=True,
             save_steps=500,
-            eval_steps=100,
+            eval_steps=50,
             logging_steps=100,
             learning_rate=3e-4,
             weight_decay=0.0001,

@@ -92,7 +92,6 @@ class charsiu_aligner:
                 f.write('%s\t%s\t%s\n' % (start, end, phone))
         print('Alignment output has been saved to %s' % (save_to))
 
-
 class charsiu_forced_aligner(charsiu_aligner):
 
     def __init__(self, aligner, sil_threshold=4, **kwargs):
