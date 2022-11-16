@@ -5,7 +5,7 @@ from audio_utils import *
 
 audio_dir = '/home/prad/datasets/ChildSpeechDataset/child_speech_16_khz'
 manual_textgrids_dir = '/home/prad/datasets/ChildSpeechDataset/manually-aligned-text-grids/'
-mfa_sat_dir = '/home/prad/datasets/ChildSpeechDataset/mfa_adapted/'
+mfa_sat_dir = '/home/prad/datasets/ChildSpeechDataset/results_mfa_adapted/'
 # mfa_sat_dir = '/home/prad/datasets/ChildSpeechDataset/mfa_with_sat/'
 
 unmatched_manual_textgrid_files = get_all_textgrids_in_directory(manual_textgrids_dir)

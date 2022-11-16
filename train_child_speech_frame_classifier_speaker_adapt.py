@@ -339,6 +339,7 @@ if __name__ == "__main__":
           (results_dir, len(completed_speakers), len(unique_speakers)))
 
     speakers_to_run = list(set(unique_speakers) - set(completed_speakers))
+    # speakers_to_run = unique_speakers
     print('Running on %d speakers' % len(speakers_to_run))
     np.random.seed(1337)
 

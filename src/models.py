@@ -336,7 +336,8 @@ class Wav2Vec2ForFrameClassificationSAT(Wav2Vec2ForCTC):
         hidden_states = self.dropout(hidden_states)
 
         #framewise append i/xvector
-        satvector = ixvector.unsqueeze(dim=1).repeat(1, hidden_states.shape[1], 1)
+        # satvector = ixvector.unsqueeze(dim=1).repeat(1, hidden_states.shape[1], 1)
+        satvector = ixvector.unsqueeze(dim=0).repeat(1, hidden_states.shape[1], 1)
         hidden_states = torch.cat([hidden_states, satvector], dim=-1)
 
 

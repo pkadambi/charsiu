@@ -1,5 +1,7 @@
+import copy
 import pandas as pd
 import numpy as np
+from g2p_en import G2p
 from praatio.data_classes.textgrid import Textgrid
 from praatio import textgrid
 from phoneme_info import *
@@ -7,11 +9,89 @@ import tqdm
 import re
 import os
 
-def get_english_phone_list():
-    return ENGLISH_PHONEME_LIST
+g2p = G2p()
 
-def get_phoneme_info_df():
-    return PHONEME_INFO_DF
+def remove_sil_from_phonelist(phonelist):
+    res = list(filter(('[SIL]').__ne__, phonelist))
+    res = list(filter(('sil').__ne__, phonelist))
+    return res
+
+
+def get_df_rows_as_tuples(inpdf):
+    return [tuple(row) for row in inpdf.itertuples(index=False)]
+
+
+def add_before_after_silence(tgdf, manualdf):
+    if tgdf.start.iloc[0] > 0:
+        silence_row_df = pd.DataFrame({'start': tgdf.end.iloc[-1], 'end': manualdf.end.iloc[-1], 'phone': 'sil'},
+                                      index=[0])
+        tgdf = pd.concat([silence_row_df, tgdf]).reset_index(drop=True)
+
+    if tgdf.end.iloc[-1] < manualdf.end.iloc[-1] and tgdf.phone.iloc[-1] != 'sil':
+        silence_row_df = pd.DataFrame({'start': tgdf.end.iloc[-1], 'end': manualdf.end.iloc[-1], 'phone': 'sil'},
+                                      index=[max(tgdf.index) + 1])
+        tgdf = pd.concat([tgdf, silence_row_df]).reset_index(drop=True)
+    return tgdf
+
+def get_transcript_from_tgfile(tgfilepath, datapath = '/home/prad/datasets/ChildSpeechDataset/child_speech_16_khz'):
+    try:
+        speaker_id = tgfilepath.split('/')[-2]
+    except:
+        print(tgfilepath)
+    scriptfname = tgfilepath.split('/')[-1].split('.')[-2] + '.lab'
+    scriptfpath = os.path.join(datapath,  speaker_id, scriptfname)
+    f = open(scriptfpath)
+    transcript = f.read().replace('\n', ' ')
+    f.close()
+    return transcript
+
+def is_start_phone(phn, phonelist):
+    space_locs = np.argwhere(phonelist==' ').ravel()
+    start_idxs = np.concatenate(([0], space_locs+1))
+    phn_idx = np.argwhere(phonelist==phn)
+    return any([_idx in start_idxs for _idx in phn_idx])
+
+def is_end_phone(phn, phonelist):
+    space_locs = np.argwhere(phonelist==' ').ravel()
+    end_idxs = np.concatenate((space_locs-1, [len(phonelist)]))
+    phn_idx = np.argwhere(phonelist==phn)
+    return any([_idx in end_idxs for _idx in phn_idx])
+
+def collapse_repeated_phones(input_df, phonekey='phone'):
+    # keepdata = []
+    inp_df = copy.deepcopy(input_df)
+    ii=0
+    while ii<len(inp_df)-1:
+        if inp_df.at[ii, phonekey]==inp_df.at[ii+1, phonekey]:
+            newend = inp_df.at[ii+1, 'end']
+            inp_df.at[ii, 'end'] = newend
+            inp_df = inp_df.drop(ii+1, axis=0).reset_index(drop=True)
+        else:
+            ii+=1
+    return inp_df
+
+def process_silences(inp_df, transcript: str, silphone='sil'):
+    phonelist = g2p(transcript)
+    tgdf = copy.deepcopy(inp_df)
+    ''' flag silences in the middle of a word with nan'''
+    for ii in range(len(tgdf)):
+        if ii < len(tgdf) - 1 and ii > 0:
+            # print(tgdf[phonekey][ii])
+            if tgdf['phone'][ii] == silphone:
+                prevphone = tgdf['phone'].iloc[ii - 1]
+                nextphone = tgdf['phone'].iloc[ii + 1]
+
+                if prevphone == nextphone and not (
+                        is_end_phone(prevphone, phonelist) and is_start_phone(nextphone, phonelist)):
+                    tgdf.at[ii, 'phone'] = np.nan
+
+    ''' remove the silences'''
+    # tgdf = tgdf[~pd.isna(tgdf[phonekey])].reset_index(drop=True).drop(columns=['index'])
+    tgdf = tgdf[~pd.isna(tgdf['phone'])].reset_index(drop=True)
+    ''' collapse the repeated phonemes '''
+    return collapse_repeated_phones(tgdf, phonekey='phone')
+
+
 
 def get_all_textgrids_in_directory(directory, verbose=True):
     textgrid_files = []
@@ -33,6 +113,15 @@ def get_all_textgrids_in_directory(directory, verbose=True):
 
     return textgrid_files
 
+def get_all_filetype_in_directory(directory, filetype):
+    audiofiles = []
+    for root, dirs, files in os.walk(directory):
+        for fname in files:
+            if filetype in fname:
+                _fpath = os.path.join(root, fname)
+                print(_fpath)
+                audiofiles.append(_fpath)
+
 def textgridpath_to_phonedf(txtgrid_path: str, phone_key: str, remove_numbers=False, replace_silence=True):
     '''
     txtgrid_path - the path to the textgridfile
@@ -41,7 +130,10 @@ def textgridpath_to_phonedf(txtgrid_path: str, phone_key: str, remove_numbers=Fa
     txtgrid = textgrid.openTextgrid(txtgrid_path, False)
     phndf = extract_phone_df_from_textgrid(txtgrid=txtgrid, phone_key=phone_key, remove_numbers=remove_numbers)
     if replace_silence:
-        phndf.iloc[phndf.iloc[:, 2] == '[SIL]', 2] = 'sil'
+        phndf = phndf.replace('[SIL]', 'sil')
+        phndf = phndf.replace('sp', 'sil')
+        # phndf.iloc[phndf.iloc[:, 2] == '[SIL]', 2] = 'sil'
+        # phndf.iloc[phndf.iloc[:, 2] == '[SIL]', 2] = 'sp'
 
     return phndf
 

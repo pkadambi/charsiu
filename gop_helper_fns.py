@@ -107,7 +107,10 @@ def _calc_GOP(logprobas, aligned_phn_idxs, sil_phone='[SIL]', phone_subset=None,
     return output
 
 
-# TODO implement for phone subset
+def _calc_GOP_instance_wise(logprobas, aligned_phn_idxs, sil_phone='[SIL]', phone_subset=None, ignore_sil=True,
+              phone2id_dict=PHONE2IND, id2phone_dict=IND2PHONE):
+    pass
+
 
 def get_aligner_frame_seq_len(audio_filepath, fs, charsiu):
     audio = charsiu.charsiu_processor.audio_preprocess(audio_filepath, sr=fs)
@@ -150,6 +153,7 @@ def calculate_GOP_e2e(audio, transcript, charsiu_model=CHARSIU_MODEL, textgrid_a
         logprobas = torch.log_softmax(logits, dim=-1).numpy()
         gopoutput = _calc_GOP(logprobas, aligned_phn_idxs, phone_subset=phone_subset)
         return gopoutput['phonewise_gop'], gopoutput['phonewise_gop_mean']
+
 
 if __name__ == "__main__":
     """

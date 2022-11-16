@@ -101,7 +101,7 @@ class charsiu_forced_aligner(charsiu_aligner):
 
         self._freeze_model()
 
-    def align(self, audio, text, return_logits=False, TEMPERATURE=1):
+    def align(self, audio, text, target_phones=None, return_logits=False, TEMPERATURE=1):
         '''
         Perform forced alignment
 
@@ -120,6 +120,10 @@ class charsiu_forced_aligner(charsiu_aligner):
         audio = self.charsiu_processor.audio_preprocess(audio, sr=self.sr)
         audio = torch.Tensor(audio).unsqueeze(0).to(self.device)
         phones, words = self.charsiu_processor.get_phones_and_words(text)
+
+        if target_phones is not None:
+            phones=target_phones
+
         phone_ids = self.charsiu_processor.get_phone_ids(phones)
 
         with torch.no_grad():
@@ -146,7 +150,7 @@ class charsiu_forced_aligner(charsiu_aligner):
         else:
             return pred_phones, pred_words
 
-    def serve(self, audio, text, save_to, output_format='textgrid'):
+    def serve(self, audio, text, save_to, target_phones=None, output_format='textgrid'):
         '''
          A wrapper function for quick inference
 
@@ -165,7 +169,7 @@ class charsiu_forced_aligner(charsiu_aligner):
         None.
 
         '''
-        phones, words = self.align(audio, text)
+        phones, words = self.align(audio, text, target_phones=target_phones)
 
         if output_format == 'tsv':
             if save_to.endswith('.tsv'):
@@ -235,7 +239,7 @@ class charsiu_sat_forced_aligner(charsiu_aligner):
         self.sil_threshold = sil_threshold
         self._freeze_model()
 
-    def align(self, audio, text, ixvector):
+    def align(self, audio, text, ixvector, target_phones=None, return_logits=False, TEMPERATURE=1):
         '''
         Perform forced alignment
 
@@ -251,14 +255,27 @@ class charsiu_sat_forced_aligner(charsiu_aligner):
         A tuple of aligned phones in the form (start_time, end_time, phone)
 
         '''
-        # audio = self.charsiu_processor.audio_preprocess(audio, sr=self.sr)
-        # audio = torch.Tensor(audio).unsqueeze(0).to(self.device)
-
-
         audio = self.charsiu_processor.audio_preprocess(audio, sr=self.sr)
         audio = torch.Tensor(audio).unsqueeze(0).to(self.device)
-        ixvector = torch.Tensor(ixvector).unsqueeze(0).to(self.device)
         phones, words = self.charsiu_processor.get_phones_and_words(text)
+
+        if target_phones is not None:
+            try:
+                if not (np.array(phones)==np.array(target_phones)).all():
+                    print('target')
+                    print(target_phones)
+                    print('g2p')
+                    print(phones)
+            except:
+                print('text')
+                print(text)
+                print('target')
+                print(target_phones)
+                print('g2p')
+                phnsg2p = [item for t in phones for item in t]
+                print(phnsg2p)
+            phones=target_phones
+
         phone_ids = self.charsiu_processor.get_phone_ids(phones)
 
         with torch.no_grad():
@@ -282,7 +299,7 @@ class charsiu_sat_forced_aligner(charsiu_aligner):
         pred_words = self.charsiu_processor.align_words(pred_phones, phones, words)
         return pred_phones, pred_words
 
-    def serve(self, audio, text, ixvector, save_to, output_format='textgrid', verbose=False):
+    def serve(self, audio, text, ixvector, save_to, target_phones=None, output_format='textgrid', verbose=False):
         '''
          A wrapper function for quick inference
 
@@ -301,7 +318,7 @@ class charsiu_sat_forced_aligner(charsiu_aligner):
         None.
 
         '''
-        phones, words = self.align(audio, text, ixvector)
+        phones, words = self.align(audio, text, ixvector, target_phones=target_phones)
 
         if output_format == 'tsv':
             if save_to.endswith('.tsv'):
