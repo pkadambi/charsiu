@@ -14,6 +14,9 @@ CHARSIU_MODEL = charsiu_forced_aligner('charsiu/en_w2v2_fc_10ms', device=DEVICE)
 PHONE2IND = CHARSIU_MODEL.charsiu_processor.processor.tokenizer.encoder
 IND2PHONE = CHARSIU_MODEL.charsiu_processor.processor.tokenizer.decoder
 
+# MIN_PHONE_LENGTH_DF = pd.read_csv('./min_phone_lengths.csv')
+MIN_PHONE_LENGTH_DF = []
+
 ''' get logprobas from healthy aligner'''
 
 def get_logprobas(audio_path, charsiu):
@@ -31,7 +34,7 @@ def get_logprobas(audio_path, charsiu):
 ''' get aligned phone ids from aligned df'''
 
 
-def return_aligned_phns_and_ids(aligned_df, seqlen, phone2id_dict=PHONE2IND, id2phone_dict=IND2PHONE):
+def return_aligned_phns_and_ids(aligned_df, seqlen, phone2id_dict=PHONE2IND):
     timesteps = .01 * np.arange(seqlen) + .01
     # timesteps = .01 * np.arange(530)
 
@@ -58,9 +61,16 @@ def return_aligned_phns_and_ids(aligned_df, seqlen, phone2id_dict=PHONE2IND, id2
     aligned_phn_idxs = [phone2id_dict[phone] for phone in aligned_phns]
     return np.array(aligned_phns), np.array(aligned_phn_idxs)
 
+def phone_occurance_too_short(phone_idx, nframes, id2phone_dict=IND2PHONE, frame_step=.01, phone_minlen=.02):
+    # frame_step
+    phone = id2phone_dict[phone_idx]
 
-def _calc_GOP(logprobas, aligned_phn_idxs, sil_phone='[SIL]', phone_subset=None, ignore_sil=True,
-              phone2id_dict=PHONE2IND, id2phone_dict=IND2PHONE):
+    # phone_minlen = MIN_PHONE_LENGTH_DF[phone]
+    phonelen = nframes * frame_step
+    return phone_minlen>=phonelen
+
+def _calc_GOP(logprobas, aligned_phn_idxs, sil_phone='[SIL]', phone_subset=None, ignore_short=True,
+              phone2id_dict=PHONE2IND, id2phone_dict=IND2PHONE, frame_step=.01):
     sil_phn_idx = phone2id_dict[sil_phone]
 
     max_phn_idxs = np.argmax(logprobas, axis=1)
@@ -69,9 +79,63 @@ def _calc_GOP(logprobas, aligned_phn_idxs, sil_phone='[SIL]', phone_subset=None,
          enumerate(zip(aligned_phn_idxs, max_phn_idxs))])
     unique_phone_idxs = np.unique(aligned_phn_idxs)
 
-    def get_gop_for_phone(phone_idx, framewise_gop, aligned_phn_idxs):
+
+    def get_phonelen_from_idxs(phone_frame_idxs):
+        '''
+        gets the length in frames from each occurance of the phoneme
+
+        Input: a sorted array of all the indexes at which the phoneme occurs
+
+        output
+
+        example:
+        input [0, 1, 2, 3, 4, 99, 149, 150, 160, 170, 487, 488]
+        output [5, 1, 4, 2]
+        -------
+
+        '''
+        previdx = -1
+        lengths_of_phone = []
+        frame_length_count = 0
+        for ii in range(len(phone_frame_idxs)):
+            curridx = phone_frame_idxs[ii]
+            if previdx == -1:
+                frame_length_count += 1
+            elif previdx + 1 == curridx:
+                frame_length_count += 1
+            else:
+                lengths_of_phone.append(frame_length_count)
+                frame_length_count = 1
+            previdx = curridx
+
+            if ii == len(phone_frame_idxs) - 1:
+                lengths_of_phone.append(frame_length_count)
+
+        return lengths_of_phone
+
+    def filter_out_short_ids(phone_idx, phone_frame_idxs, lengths_of_phone):
+        ind_pointer = 0
+        keepinds = np.ones_like(phone_frame_idxs).astype('bool')
+        for ii, phoneframelen in enumerate(lengths_of_phone):
+            if phone_occurance_too_short(phone_idx, phoneframelen):
+                keepinds[ind_pointer: ind_pointer + phoneframelen] = False
+            ind_pointer += phoneframelen
+        return phone_frame_idxs[keepinds]
+
+    def get_gop_for_phone(phone_idx, framewise_gop, aligned_phn_idxs, ignore_short=False):
         phone_frame_idxs = np.argwhere(aligned_phn_idxs == phone_idx).ravel()
+
+        if ignore_short:
+
+            lengths_of_phone = get_phonelen_from_idxs(phone_frame_idxs)
+            phone_frame_idxs = filter_out_short_ids(phone_idx, phone_frame_idxs, lengths_of_phone)
+
         phone_framewise_gop = framewise_gop[phone_frame_idxs]
+
+                # length_of_phone.append()
+        if len(phone_framewise_gop)==0:
+            return np.nan, 0
+
         return np.mean(phone_framewise_gop), len(phone_frame_idxs)
 
     phonewise_gops = []
@@ -79,8 +143,9 @@ def _calc_GOP(logprobas, aligned_phn_idxs, sil_phone='[SIL]', phone_subset=None,
     for _phone_id in unique_phone_idxs:
         if not _phone_id==sil_phn_idx:
             phone_name = id2phone_dict[_phone_id]
-            phone_gop, phone_frameduration = get_gop_for_phone(phone_idx=_phone_id,
-                                          framewise_gop=framewise_gop, aligned_phn_idxs=aligned_phn_idxs)
+            phone_gop, phone_frameduration = get_gop_for_phone(phone_idx=_phone_id, framewise_gop=framewise_gop,
+                                                               aligned_phn_idxs=aligned_phn_idxs,
+                                                               ignore_short=ignore_short)
             phonewise_gops.append((phone_name, phone_gop, phone_frameduration))
             phone_durations.append(phone_frameduration)
 
@@ -89,8 +154,8 @@ def _calc_GOP(logprobas, aligned_phn_idxs, sil_phone='[SIL]', phone_subset=None,
     nosil_idxs = np.argwhere(aligned_phn_idxs != sil_phn_idx).ravel()
     framewise_gop_nosil = framewise_gop[nosil_idxs]
     output = {'framewise_gop': framewise_gop_nosil, 'gopmean': np.mean(framewise_gop_nosil),
-              'gop_withsil': np.mean(framewise_gop), 'phonewise_gop':phonewise_gop_df,
-              'phonewise_gop_mean': np.mean(phonewise_gop_df['GOP'].mean()),
+              'gop_withsil': np.nanmean(framewise_gop), 'phonewise_gop':phonewise_gop_df,
+              'phonewise_gop_mean': np.nanmean(phonewise_gop_df['GOP'].mean()),
               'phonewise_gop_mean_weighted': np.average(list(phonewise_gop_df['GOP'].values), weights=duration_weights)}
 
     if phone_subset is not None:
@@ -107,11 +172,6 @@ def _calc_GOP(logprobas, aligned_phn_idxs, sil_phone='[SIL]', phone_subset=None,
     return output
 
 
-def _calc_GOP_instance_wise(logprobas, aligned_phn_idxs, sil_phone='[SIL]', phone_subset=None, ignore_sil=True,
-              phone2id_dict=PHONE2IND, id2phone_dict=IND2PHONE):
-    pass
-
-
 def get_aligner_frame_seq_len(audio_filepath, fs, charsiu):
     audio = charsiu.charsiu_processor.audio_preprocess(audio_filepath, sr=fs)
     audio = torch.Tensor(audio).unsqueeze(0).to(charsiu.device)
@@ -119,7 +179,8 @@ def get_aligner_frame_seq_len(audio_filepath, fs, charsiu):
     return charsiu.aligner._get_feat_extract_output_lengths(audio)
 
 
-def calculate_GOP_e2e(audio, transcript, charsiu_model=CHARSIU_MODEL, textgrid_alignment=None, phone_subset=None, TEMPERATURE=1):
+def calculate_GOP_e2e(audio, transcript, charsiu_model=CHARSIU_MODEL, textgrid_alignment=None, phone_subset=None,
+                      TEMPERATURE=1, ignore_short=False):
     #TODO: provide an input alignment textgrid and hav the GOP compute using the provided alignment
     if type(audio) == str:
         audio_signal, fs = sf.read(audio)
@@ -133,6 +194,7 @@ def calculate_GOP_e2e(audio, transcript, charsiu_model=CHARSIU_MODEL, textgrid_a
         # print('using textgrid')
 
         if type(textgrid_alignment) == str:
+            print('here')
             input_alignment_df = extract_phone_df_from_textgrid(textgrid.openTextgrid(textgrid_alignment, False),
                                                                 phone_key='phones', remove_numbers=True)
         elif type(textgrid_alignment) == pd.DataFrame:
@@ -141,8 +203,16 @@ def calculate_GOP_e2e(audio, transcript, charsiu_model=CHARSIU_MODEL, textgrid_a
     with torch.no_grad():
         aligned_phones, words, logits = charsiu_model.align(audio_signal, text=transcript, return_logits=True,
                                                             TEMPERATURE=TEMPERATURE)
-        w2v_alignment_phone_df = pd.DataFrame.from_records(aligned_phones, columns=['start', 'end', 'phone'])
+        # aligned_phones = process_silences(aligned_phones, transcript)
+        aligned_phones = [list(algn) + [algn[1] - algn[0]] for algn in aligned_phones]
+
+        w2v_alignment_phone_df = pd.DataFrame.from_records(aligned_phones, columns=['start', 'end', 'phone', 'duration'])
         if USE_MANUAL_ALIGNMENT:
+            # print(input_alignment_df)
+            # print(input_alignment_df.iloc[:, 1])
+            # print(input_alignment_df.iloc[:, 0])
+            if 'duration' not in input_alignment_df.columns:
+                input_alignment_df['duration'] = input_alignment_df['end'] - input_alignment_df['end']
             aligned_phone_df = input_alignment_df
         else:
             aligned_phone_df = w2v_alignment_phone_df
@@ -151,7 +221,8 @@ def calculate_GOP_e2e(audio, transcript, charsiu_model=CHARSIU_MODEL, textgrid_a
         # print(seqlen)
         aligned_phns, aligned_phn_idxs = return_aligned_phns_and_ids(aligned_phone_df, seqlen=seqlen)
         logprobas = torch.log_softmax(logits, dim=-1).numpy()
-        gopoutput = _calc_GOP(logprobas, aligned_phn_idxs, phone_subset=phone_subset)
+        gopoutput = _calc_GOP(logprobas, aligned_phn_idxs, phone_subset=phone_subset,
+                              ignore_short=ignore_short)
         return gopoutput['phonewise_gop'], gopoutput['phonewise_gop_mean']
 
 
@@ -161,10 +232,16 @@ if __name__ == "__main__":
     """
     audio_filepath = '/home/prad/datasets/als_at_home/als_at_home_audio_files/1002-20170522-1917-3.wav'
     transcript = 'Much more money must be donated to make this department succeed'
-    gop, per_phone_gop = calculate_GOP_e2e(audio = audio_filepath, transcript = transcript, TEMPERATURE=1)
-    print(gop, per_phone_gop, '\t Temp 1:\t')
+    per_phone_gop, gop = calculate_GOP_e2e(audio = audio_filepath, transcript = transcript, TEMPERATURE=1)
+    print(per_phone_gop, '\t Normal phonewise gop\t')
+    print('Normal mean gop', gop)
 
-    gop, per_phone_gop = calculate_GOP_e2e(audio = audio_filepath, transcript = transcript, TEMPERATURE=2)
+    per_phone_gop, gop = calculate_GOP_e2e(audio = audio_filepath, transcript = transcript, TEMPERATURE=1,
+                                           ignore_short=True)
+    print(per_phone_gop, '\t FilterShort phonewise gop\t')
+    print('Filtershort mean gop', gop)
+
+    per_phone_gop, gop = calculate_GOP_e2e(audio = audio_filepath, transcript = transcript, TEMPERATURE=2)
     print(gop, per_phone_gop, '\t Temp 2:\t')
 
     TRANSCRIPT = 'The chairman decided to pave over the shopping center garden'

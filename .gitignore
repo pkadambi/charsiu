@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 
 # Results and experiment directories
+*saved_figures/
 src/__pycache__
 models_test*/
 charsiu_w2v2*/

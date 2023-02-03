@@ -388,7 +388,7 @@ if __name__ == "__main__":
             )
         # freeze convolutional layers and set the stride of the last conv layer to 1
         # this increase the sampling frequency to 98 Hz
-        model.wav2vec2.feature_extractor.conv_layers[6].conv.stride = (1,)
+        mod_el.wav2vec2.feature_extractor.conv_layers[6].conv.stride = (1,)
         model.config.conv_stride[-1] = 1
         model.freeze_feature_extractor()
 
