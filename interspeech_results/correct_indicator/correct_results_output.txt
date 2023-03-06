@@ -1,0 +1,52 @@
+---------------------------------------------------------------------
+METHOD:  frame
+---------------------------------------------------------------------
+Subset fricative
+Accuracy:  0.9436885074314423
+Subset other
+Accuracy:  0.8940185341196293
+Subset plosive
+Accuracy:  0.8620325693606755
+Subset sil
+Accuracy:  0.956901489117984
+Subset vowel
+Accuracy:  0.9561194576768047
+
+---------------------------------------------------------------------
+METHOD:  ivec
+---------------------------------------------------------------------
+Subset fricative
+Accuracy:  0.9503872723466611
+Subset other
+Accuracy:  0.9044489383215369
+Subset plosive
+Accuracy:  0.8786188178528347
+Subset sil
+Accuracy:  0.9463780418788907
+Subset vowel
+Accuracy:  0.9591387998167659
+
+Backend TkAgg is interactive backend. Turning interactive mode on.
+---------------------------------------------------------------------
+METHOD:  xvec
+---------------------------------------------------------------------
+Subset fricative
+Accuracy:  0.9539930555555556
+Subset other
+Accuracy:  0.9287303664921466
+Subset plosive
+Accuracy:  0.9044286077882413
+Subset vowel
+Accuracy:  0.9657809069573775
+
+---------------------------------------------------------------------
+METHOD:  mfa_train
+---------------------------------------------------------------------
+Subset fricative
+Accuracy:  0.9171772660046482
+Subset other
+Accuracy:  0.8630911583276216
+Subset plosive
+Accuracy:  0.8700590640617901
+Subset vowel
+Accuracy:  0.8803237972587619

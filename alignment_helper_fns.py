@@ -11,9 +11,20 @@ import os
 
 g2p = G2p()
 
+def contains_same_phones(phone_list1, phone_list2):
+    '''
+        simply checks that two phoneme lists are the same
+        for example that a ground truth textgrid and an estimated textgrid have the same list of phonemes
+    '''
+    try:
+        # return np.logical_and.reduce(np.unique(phone_list1)==np.unique(phone_list2))
+        return np.all(np.array(phone_list1)==np.array(phone_list2))
+    except:
+        return False
+
 def remove_sil_from_phonelist(phonelist):
     res = list(filter(('[SIL]').__ne__, phonelist))
-    res = list(filter(('sil').__ne__, phonelist))
+    res = list(filter(('sil').__ne__, res))
     return res
 
 
@@ -22,6 +33,9 @@ def get_df_rows_as_tuples(inpdf):
 
 
 def add_before_after_silence(tgdf, manualdf):
+    '''
+
+    '''
     if tgdf.start.iloc[0] > 0:
         silence_row_df = pd.DataFrame({'start': tgdf.end.iloc[-1], 'end': manualdf.end.iloc[-1], 'phone': 'sil'},
                                       index=[0])
@@ -34,6 +48,20 @@ def add_before_after_silence(tgdf, manualdf):
     return tgdf
 
 def get_transcript_from_tgfile(tgfilepath, datapath = '/home/prad/datasets/ChildSpeechDataset/child_speech_16_khz'):
+    '''
+        each phoneme is associated with words in the transcript
+        This function returns which phonemes in the textgrid occur at the start of a word
+
+        Example:
+
+        transcript - 'good day'
+        phonelist = ['G', 'UH', 'D', ' ', 'D', 'AE', 'Y']
+
+        1. the first phoneme at [0] is a start phone
+        2a. find the locations of the spaces ' '
+        2b. any phonemes occuring after a space are also start phones
+
+    '''
     try:
         speaker_id = tgfilepath.split('/')[-2]
     except:
@@ -43,21 +71,50 @@ def get_transcript_from_tgfile(tgfilepath, datapath = '/home/prad/datasets/Child
     f = open(scriptfpath)
     transcript = f.read().replace('\n', ' ')
     f.close()
-    return transcript
+    return transcript.strip()
 
 def is_start_phone(phn, phonelist):
+    '''
+        each phoneme is associated with words in the transcript
+        This function returns which phonemes in the textgrid occur at the start of a word
+
+        Example:
+
+        transcript - 'good day'
+        phonelist = ['G', 'UH', 'D', ' ', 'D', 'AE', 'Y']
+
+        1. the first phoneme at [0] is a start phone
+        2a. find the locations of the spaces ' '
+        2b. any phonemes occuring after a space are also start phones
+
+    '''
     space_locs = np.argwhere(phonelist==' ').ravel()
     start_idxs = np.concatenate(([0], space_locs+1))
     phn_idx = np.argwhere(phonelist==phn)
     return any([_idx in start_idxs for _idx in phn_idx])
 
 def is_end_phone(phn, phonelist):
+    '''
+    find the location of end phonemes
+    does nearly the same thing as the is_start_phone function, except for end phones
+    '''
     space_locs = np.argwhere(phonelist==' ').ravel()
     end_idxs = np.concatenate((space_locs-1, [len(phonelist)]))
     phn_idx = np.argwhere(phonelist==phn)
     return any([_idx in end_idxs for _idx in phn_idx])
 
 def collapse_repeated_phones(input_df, phonekey='phone'):
+    '''
+    input:
+        input_df - the input textgrid
+
+    logic:
+        - just concatenates consecutive identical phonemes
+
+        for each line in the input textgrid df, check if the next phoneme is the same as the current phoneme
+        if they are, simply
+
+    '''
     # keepdata = []
     inp_df = copy.deepcopy(input_df)
     ii=0
@@ -236,13 +293,28 @@ def extract_phn_midpoint_dict_from_df(phoneme_df):
 
 
 def calc_alignment_accuracy_between_textgrids(manual_textgridpath: str, aligner_textgridpath: str, manual_phonekey: str,
-                                              aligner_phonekey: str, remove_numbers=True, ignore_extras=True,
-                                              ignore_silence=False):
+                                              aligner_phonekey: str, collapse_shortphones: bool,
+                                              remove_numbers=True, ignore_extras=True,
+                                              replace_silence=True, ):
     #TODO: return the label along with whether it was correct so that you can figure out which phonemes were wrong
 
-    manualdf = textgridpath_to_phonedf(manual_textgridpath, phone_key=manual_phonekey, remove_numbers=True)
+    manualdf = textgridpath_to_phonedf(manual_textgridpath, phone_key=manual_phonekey, remove_numbers=True,
+                                       replace_silence=replace_silence)
     alignerdf = textgridpath_to_phonedf(aligner_textgridpath, phone_key=aligner_phonekey, remove_numbers=True,
-                                        replace_silence=ignore_silence)
+                                        replace_silence=replace_silence)
+    manual_phones = np.array(remove_sil_from_phonelist(manualdf.phone.values))
+    aligner_phones = np.array(remove_sil_from_phonelist(alignerdf.phone.values))
+    ismatch_pre = contains_same_phones(manual_phones, aligner_phones)
+
+    transcript = get_transcript_from_tgfile(aligner_textgridpath)
+    if collapse_shortphones:
+        alignerdf = process_silences(alignerdf, transcript)
+
+    manual_phones = np.array(remove_sil_from_phonelist(manualdf.phone.values))
+    aligner_phones = np.array(remove_sil_from_phonelist(alignerdf.phone.values))
+    ismatch = contains_same_phones(manual_phones, aligner_phones)
+    if not ismatch:
+        pass
     phn_midpoints_dict = extract_phn_midpoint_dict_from_df(manualdf)
     correct_indicator = calc_accuracy(predphn_df=alignerdf, annotated_midpoints_dict=phn_midpoints_dict,
                                       ignore_extras=ignore_extras)
@@ -251,35 +323,54 @@ def calc_alignment_accuracy_between_textgrids(manual_textgridpath: str, aligner_
         print('---------------------------------------')
         print('**********Manual************\n', manualdf)
         print('**********Aligned***********\n', alignerdf)
-    return correct_indicator
+
+
+
+    return correct_indicator, ismatch
 
 def calc_accuracy_between_textgrid_lists(manual_textgrid_list, estimated_textgrid_list, manual_phonekey='ha phones',
                                          aligner_phonekey='phones', ignore_extras=True, ignore_silence=False,
-                                         verbose=True):
+                                         verbose=True, colapse_shortphones=True):
     if verbose:
         print('Caclulating alignment accuracy...')
 
-    phoneme_correct_indicator = []
+    correct_indicator = []
+    correct_indicator_matched = []
+    matched_indicator = []
     for ii, (manual_textgridpath, estimated_textgridpath) in tqdm.tqdm(enumerate(zip(manual_textgrid_list, estimated_textgrid_list))):
         try:
-            _correct_indicator = calc_alignment_accuracy_between_textgrids(manual_textgridpath=manual_textgridpath,
+            _correct_indicator, ismatch = calc_alignment_accuracy_between_textgrids(manual_textgridpath=manual_textgridpath,
                                                                            aligner_textgridpath=estimated_textgridpath,
                                                                            manual_phonekey=manual_phonekey,
                                                                            aligner_phonekey=aligner_phonekey,
                                                                            ignore_extras=ignore_extras,
-                                                                           ignore_silence=ignore_silence)
-            phoneme_correct_indicator.append(_correct_indicator)
+                                                                           ignore_silence=ignore_silence,
+                                                                           collapse_shortphones=colapse_shortphones)
+            correct_indicator.append(_correct_indicator)
+            if ismatch:
+                correct_indicator_matched.append(_correct_indicator)
         except:
             if not os.path.exists(estimated_textgridpath):
                 print('Textgrid file ', estimated_textgridpath, ' not found, skippping this file')
+    correct_indicator = np.concatenate(correct_indicator)
+    acc = np.mean(correct_indicator)
+    numcorrect = np.sum(correct_indicator)
+    numpredicted = len(correct_indicator)
 
-    phoneme_correct_indicator = np.concatenate(phoneme_correct_indicator)
-    acc = np.mean(phoneme_correct_indicator)
-    numcorrect = np.sum(phoneme_correct_indicator)
-    numpredicted = len(phoneme_correct_indicator)
+    correct_indicator_matched = np.concatenate(correct_indicator_matched)
+    acc_matched = np.mean(correct_indicator_matched)
+    numcorrect_matched = np.sum(correct_indicator_matched)
+    numpredicted_matched = len(correct_indicator_matched)
+
     if verbose:
-        print('Accuracy Excluding Extra Phonemes')
-        print('Accuracy:\t', np.mean(phoneme_correct_indicator))
+        print('============ Total Accuracy ============')
+        print('Accuracy:\t', np.mean(correct_indicator))
         print('Num Correct:\t', numcorrect)
         print('Num Predicted Phones:\t', numpredicted)
-    return acc, numcorrect, numpredicted
+        print('============ Matched Accuracy ============')
+        print('Matched Accuracy:\t', np.mean(correct_indicator_matched))
+        print('Num Correct Matched:\t', numcorrect_matched)
+        print('Num Predicted Phones Matched:\t', numpredicted_matched)
+
+    return acc, acc_matched, numcorrect, numcorrect_matched, numpredicted, numpredicted_matched, matched_indicator
+
