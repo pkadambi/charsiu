@@ -47,7 +47,7 @@ def add_before_after_silence(tgdf, manualdf):
         tgdf = pd.concat([tgdf, silence_row_df]).reset_index(drop=True)
     return tgdf
 
-def get_transcript_from_tgfile(tgfilepath, datapath = '/home/prad/datasets/ChildSpeechDataset/child_speech_16_khz'):
+def get_transcript_from_tgfile(tgfilepath, datapath = '/media/prad/data/datasets/ChildSpeechDataset/child_speech_16_khz'):
     '''
         each phoneme is associated with words in the transcript
         This function returns which phonemes in the textgrid occur at the start of a word

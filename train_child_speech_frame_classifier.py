@@ -38,6 +38,7 @@ parser.add_argument('--results_dir', default='./results_tmp')
 parser.add_argument('--filter_speaker_age', action='store_true')
 parser.add_argument('--filter_speaker_age_range', action='store_true')
 
+# parser.add_argument('--dataset_dir', default='~/Documents/mountfolder/child_speech_data')
 parser.add_argument('--dataset_dir', default='./data/child_speech_framewise')
 parser.add_argument('--output_dir', default='./outputs')
 parser.add_argument('--device', default='cuda')
@@ -126,23 +127,17 @@ def prepare_framewise_dataset(batch, mapping=mapping_phone2id):
     return batch
 
 ''' Create dataset instance'''
-if not os.path.exists(dataset_dir):
+if os.path.exists(dataset_dir):
+    print('Found dataset at:\t', dataset_dir, '\nLoading')
+    child_speech_dataset = load_from_disk(dataset_dir)
+    unique_speakers = list(set(list(child_speech_dataset['speaker_id'])))
+else:
     print('Dataset not found at:\t', dataset_dir, '\nCreating and saving dataset')
     csd = ChildSpeechDataset(audio_paths=audio_files)
     child_speech_dataset = csd.return_as_datsets()
     child_speech_dataset = child_speech_dataset.map(prepare_framewise_dataset)
     child_speech_dataset.save_to_disk(dataset_dir)
     unique_speakers = list(set(list(child_speech_dataset['speaker_id'])))
-    # train_dataset, loso_dataset = \
-    #         speakerwise_train_test_split(child_speech_dataset, speaker_id=unique_speakers[0])
-    # train_dataset.save_to_disk(dataset_dir+'_train')
-    # loso_dataset.save_to_disk(dataset_dir+'_loso')
-else:
-    print('Found dataset at:\t', dataset_dir, '\nLoading')
-    child_speech_dataset = load_from_disk(dataset_dir)
-    unique_speakers = list(set(list(child_speech_dataset['speaker_id'])))
-    # train_dataset = load_from_disk(dataset_dir+'_train')
-    # loso_dataset = load_from_disk(dataset_dir+'_loso')
 
 
 
@@ -428,6 +423,7 @@ if __name__ == "__main__":
             weight_decay=0.0001,
             warmup_steps=1000,
             save_total_limit=2,
+            remove_unused_columns=False,
         )
         trainer = Trainer(
             model=model,

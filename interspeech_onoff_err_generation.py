@@ -30,7 +30,7 @@ speaker_tgs = {}
 
 EXCLUDE_FILES = ['0505_M_EKs4T10', '0411_M_LMwT32']
 
-allmanual_tgs = [pth for pth in get_all_textgrids_in_directory('/home/prad/datasets/ChildSpeechDataset/manually-aligned-text-grids/') if '.TextGrid' in pth]
+allmanual_tgs = [pth for pth in get_all_textgrids_in_directory('/media/prad/data/datasets/ChildSpeechDataset/manually-aligned-text-grids/') if '.TextGrid' in pth]
 allmanual_tgs = [tg for tg in allmanual_tgs if all([_excludefile not in tg for _excludefile in EXCLUDE_FILES])]
 
 ivector_tgs =[pth for pth in get_all_textgrids_in_directory('./results_sat') if '.TextGrid' in pth]
@@ -53,8 +53,8 @@ print(len(mfa_tgs))
 
 # if not (os.path.exists('./outputs/gt_dfs.pkl') and os.path.exists('./outputs/phone_accuracy_dfs.pkl')):
 
-methodnames = ['mfa_train', 'mfa_base', 'frame', 'ivector', 'xvector']
-methodnames = ['mfa_train', 'mfa_base']
+methodnames = ['xvector', 'mfa_train', 'mfa_base', 'frame', 'ivector']
+# methodnames = ['mfa_train', 'mfa_base']
 phone_durations = {}
 phone_onset_err = {}
 phone_offset_err = {}
@@ -104,7 +104,7 @@ for phone in tqdm.tqdm(ENGLISH_PHONEME_LIST):
         for speakerid in list(satdf.index):
 
             tgs_manual = get_all_textgrids_in_directory(
-                os.path.join('/home/prad/datasets/ChildSpeechDataset/manually-aligned-text-grids/', speakerid),
+                os.path.join('/media/prad/data/datasets/ChildSpeechDataset/manually-aligned-text-grids/', speakerid),
                 verbose=False)
             if method == 'frame':
                 tgs_method = get_all_textgrids_in_directory(os.path.join('./results_frame_10epochs', speakerid),

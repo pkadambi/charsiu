@@ -150,6 +150,16 @@ def evaluate_tg_results(method, phone, tglist, tgs_manual, durations_est, onset_
             tg = process_silences(tg, transcript)
         tg_gt = get_gt_tg(tgs_manual, target_tgpath=tgpath)
 
+
+
+        tgp = textgrid.Textgrid()
+        tgtup = [tuple(val) for val in list(tg.values)]
+        phoneTier = textgrid.IntervalTier('phones', tgtup, 0, tgtup[-1][1])
+        tgp.addTier(phoneTier)
+        outpath = tgpath.replace('textgrids', 'processed')
+        os.makedirs(os.path.dirname(outpath), exist_ok=True)
+        tgp.save(tgpath.replace('textgrids', 'processed'), format="short_textgrid", includeBlankSpaces=False)
+
         if phone_in_tg(tg, phone) and phone_in_tg(tg_gt, phone):
             metrics = tg_error(tg_gt, tg, phone)
             # print('here')
@@ -169,4 +179,5 @@ def evaluate_tg_results(method, phone, tglist, tgs_manual, durations_est, onset_
             # print(on_err_pct)
             # print(on_err)
     return est_dur, on_err, on_err_pct, off_err, off_err_pct, nerr
+
 

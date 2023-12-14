@@ -3,9 +3,9 @@ import numpy as np
 from alignment_helper_fns import *
 from audio_utils import *
 
-audio_dir = '/home/prad/datasets/ChildSpeechDataset/child_speech_16_khz'
-manual_textgrids_dir = '/home/prad/datasets/ChildSpeechDataset/manually-aligned-text-grids/'
-mfa_sat_dir = '/home/prad/datasets/ChildSpeechDataset/results_mfa_adapted/'
+audio_dir = '/media/prad/data/datasets/ChildSpeechDataset/child_speech_16_khz'
+manual_textgrids_dir = '/media/prad/data/datasets/ChildSpeechDataset/manually-aligned-text-grids/'
+mfa_sat_dir = '/media/prad/data/datasets/ChildSpeechDataset/results_mfa_adapted/'
 # mfa_sat_dir = '/home/prad/datasets/ChildSpeechDataset/mfa_with_sat/'
 
 unmatched_manual_textgrid_files = get_all_textgrids_in_directory(manual_textgrids_dir)
@@ -24,6 +24,7 @@ need to match the corresponding files since the files loaded from the code above
 mismatched_phoneme = 0
 mismatched_lengths = 0
 print(len(aligner_textgrid_files))
+print('Finding matched pairs of [.wav, .TextGrid]...')
 for ii, aligned_tg_file in tqdm.tqdm(enumerate(aligner_textgrid_files)):
 #     print(ii)
     _filename = aligned_tg_file.split('/')[-1].replace('-', '_')
@@ -37,6 +38,7 @@ transcripts = {}
 
 ''' Extract transcripts for w2v2 aligner'''
 transcripts = {}
+print('Doing alignment...')
 for filename in audio_files:
     fname = filename.split('/')[-1]
     # speaker_dir = filename.split('/')[-2]
