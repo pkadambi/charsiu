@@ -11,10 +11,11 @@ mfa_sat_dir = '/media/prad/data/datasets/ChildSpeechDataset/results_mfa_adapted/
 unmatched_manual_textgrid_files = get_all_textgrids_in_directory(manual_textgrids_dir)
 aligner_textgrid_files = get_all_textgrids_in_directory(mfa_sat_dir)
 candidate_aligner_textgrid_files = get_all_textgrids_in_directory(mfa_sat_dir)
-manual_textgrid_files = []
+# manual_textgrid_files = []
 audio_files = ['/'.join([audio_dir,_path.split('/')[-2], _path.split('/')[-1][:-8]+'wav'])
                for _path in unmatched_manual_textgrid_files]
-
+manual_textgrid_files = [[tgfile for tgfile in unmatched_manual_textgrid_files if file.split('/')[-1].split('.')[0] in tgfile] for file in audio_files]
+manual_textgrid_files = [tg[0] for tg in manual_textgrid_files]
 from create_child_speech_dataset import *
 # csd = ChildSpeechDataset(audio_paths=audio_files)
 

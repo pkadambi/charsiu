@@ -119,3 +119,4 @@ tmp_model/
 wandb/
 xvector_df.csv
 xvector_proj_df.csv
+pretrained_models/*

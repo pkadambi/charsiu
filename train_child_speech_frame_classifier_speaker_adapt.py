@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 import pickle as pkl
 import re
 import transformers
@@ -42,6 +39,7 @@ parser.add_argument('--dataset_dir', default='./data/child_speech_framewise_xvec
 parser.add_argument('--output_dir', default='./outputs')
 parser.add_argument('--device', default='cuda')
 # parser.add_argument('--')
+
 os.environ["WANDB_DISABLED"] = "true"
 args = parser.parse_args()
 SAT_VECTORS_CSVPATH = args.sat_vectors_csvpath
@@ -388,7 +386,7 @@ if __name__ == "__main__":
             )
         # freeze convolutional layers and set the stride of the last conv layer to 1
         # this increase the sampling frequency to 98 Hz
-        mod_el.wav2vec2.feature_extractor.conv_layers[6].conv.stride = (1,)
+        model.wav2vec2.feature_extractor.conv_layers[6].conv.stride = (1,)
         model.config.conv_stride[-1] = 1
         model.freeze_feature_extractor()
 

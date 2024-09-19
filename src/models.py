@@ -143,7 +143,7 @@ class BertForMaskedPhoneLM(BertForMaskedLM):
         self.cnn = ConvBank(config.hidden_size,
                             config.hidden_size,
                             config.convbank,
-                            config.hidden_size,accurac/
+                            config.hidden_size,
                             config.hidden_size,
                             config.hidden_dropout_prob)
 

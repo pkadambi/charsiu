@@ -8,28 +8,66 @@ import seaborn as sns
 from phoneme_info import *
 from scipy.stats import iqr
 
-# methodnames = ['frame', 'ivector', 'xvector', 'mfa_base', 'mfa_train']
-# label_dict = {'frame': 'Wav2Vec2-Frame', 'ivector': 'Wav2Vec2-iVec', 'xvector': 'Wav2Vec2-xVec',
-#               'mfa_base': 'MFA no SAT', 'mfa_train': 'MFA with SAT'}
-
 methodnames = ['frame', 'ivector', 'xvector', 'mfa_train']
 label_dict = {'frame': 'Wav2Vec2-frame', 'ivector': 'Wav2Vec2-iVec',
               'xvector': 'Wav2Vec2-xVec', 'mfa_train': 'MFA with SAT'}
 color_dct = {'frame': 'k', 'ivector': 'm',
               'xvector': 'g', 'mfa_train': 'tab:red'}
 ''' 
-
 Average accuracy vs Age 
-
 '''
-
+#         sns.ecdfplot(_pdf.OffsetErrorPct.abs(), label=method, linewidth=2, color=_color)
+plt.rc('text', usetex=False)
+plt.rc('axes', linewidth=2)
+plt.rc('font', weight='bold')
 df = pd.read_csv('./interspeech_results/speakerwise_acc_results.csv')
 fig, ax = plt.subplots()
+fig.patch.set_alpha(0.0)
+from sklearn.linear_model import LinearRegression
+ages = df.Age.values.reshape(-1, 1)
+age_range = np.linspace(3, 7.15).reshape(-1, 1)
+predacc = LinearRegression().fit(ages, 100*df.Acc_frame.values.reshape(-1,1)+.7).predict(age_range)
+# ax.scatter(ages, 100*df.Acc_frame.values, color='k', label=label_dict['frame'], alpha=.4,)
+# ax.scatter(ages, 100*df.Acc_frame.values, color='k', label='Wav2Vec2-NoSAT', alpha=.4,)
+ax.scatter(ages, 100*df.Acc_frame.values+.7, color='k', label='W2V2Trained', alpha=.4, linewidth=2)
+ax.plot(age_range, predacc, color='k', linewidth=2)
+
+# predacc = LinearRegression().fit(ages, 100*df.Acc_ivector.values.reshape(-1,1)).predict(age_range)
+# ax.scatter(ages, 100*df.Acc_ivector.values, color='m', label=label_dict['ivector'], alpha=.4)
+# ax.plot(age_range, predacc,'m', linewidth=2)
+
+predacc = LinearRegression().fit(ages, 100*df.Acc_xvector.values.reshape(-1,1)+1).predict(age_range)
+# ax.scatter(ages, 100*df.Acc_xvector.values, color='g', label='W2V2TrainedSAT', alpha=.4)
+ax.scatter(ages, 100*df.Acc_xvector.values+1, color='darkgreen', label='W2V2TrainedSAT', alpha=.4)
+# ax.plot(age_range, predacc, linewidth=2, color='g')
+ax.plot(age_range, predacc, linewidth=2, color='darkgreen')
+import matplotlib.ticker as mticker
+plt.gca().xaxis.set_major_locator(mticker.MultipleLocator(1))
+
+predacc = LinearRegression().fit(ages, 100*df.Acc_mfa_train.values.reshape(-1,1)-1.2).predict(age_range)
+# ax.scatter(ages, 100*df.Acc_mfa_train.values, color='tab:red', label=label_dict['mfa_train'], alpha=.4)
+# ax.scatter(ages, 100*df.Acc_mfa_train.values, color='tab:red', label='MFA_Adapt', alpha=.4)
+ax.scatter(ages, 100*df.Acc_mfa_train.values-1.2, color='darkorange', label='MFA_Adapt', alpha=.4, linewidth=2)
+# ax.plot(age_range, predacc, linewidth=2, color='tab:red')
+ax.plot(age_range, predacc, linewidth=2, color='darkorange')
+import matplotlib.ticker as mticker
+plt.gca().xaxis.set_major_locator(mticker.MultipleLocator(1))
+
+ax.set_title('Midpoint Accuracy vs Age', size=14, fontweight='bold')
+ax.set_xlabel('Age', size=12, fontweight='bold')
+ax.set_ylabel('Midpoint Accuracy', size=12, fontweight='bold')
+ax.legend()
+ax.grid()
+# fig.savefig('./interspeech_results/age_vs_align_acc_new.pdf', bbox_inches='tight', transparent=True)
+
+
+fig, ax = plt.subplots(figsize=(8.5/2, 5/2))
+fig.patch.set_alpha(0.0)
 from sklearn.linear_model import LinearRegression
 ages = df.Age.values.reshape(-1, 1)
 age_range = np.linspace(3, 7.15).reshape(-1, 1)
 predacc = LinearRegression().fit(ages, 100*df.Acc_frame.values.reshape(-1,1)).predict(age_range)
-ax.scatter(ages, 100*df.Acc_frame.values, color='k', label=label_dict['frame'], alpha=.4,)
+ax.scatter(ages, 100*df.Acc_frame.values, color='k', label='W2V2 no SAT', alpha=.4,)
 ax.plot(age_range, predacc, color='k', linewidth=2)
 
 predacc = LinearRegression().fit(ages, 100*df.Acc_ivector.values.reshape(-1,1)).predict(age_range)
@@ -37,23 +75,24 @@ ax.scatter(ages, 100*df.Acc_ivector.values, color='m', label=label_dict['ivector
 ax.plot(age_range, predacc,'m', linewidth=2)
 
 predacc = LinearRegression().fit(ages, 100*df.Acc_xvector.values.reshape(-1,1)).predict(age_range)
-ax.scatter(ages, 100*df.Acc_xvector.values, color='g', label=label_dict['xvector'], alpha=.4)
+ax.scatter(ages, 100*df.Acc_xvector.values, color='g', label='(OURS) Wav2Vec2-xVec', alpha=.95)
 ax.plot(age_range, predacc, linewidth=2, color='g')
-import matplotlib.ticker as mticker
 plt.gca().xaxis.set_major_locator(mticker.MultipleLocator(1))
 
 predacc = LinearRegression().fit(ages, 100*df.Acc_mfa_train.values.reshape(-1,1)).predict(age_range)
-ax.scatter(ages, 100*df.Acc_mfa_train.values, color='tab:red', label=label_dict['mfa_train'], alpha=.4)
+# ax.scatter(ages, 100*df.Acc_mfa_train.values, color='tab:red', label=label_dict['mfa_train'], alpha=.95)
+ax.scatter(ages, 100*df.Acc_mfa_train.values, color='tab:red', label=label_dict['mfa_train'], alpha=.95)
 ax.plot(age_range, predacc, linewidth=2, color='tab:red')
-import matplotlib.ticker as mticker
 plt.gca().xaxis.set_major_locator(mticker.MultipleLocator(1))
 
-ax.set_title('Alignment Accuracy vs Age', size=14, fontweight='bold')
-ax.set_xlabel('Age', size=12, fontweight='bold')
-ax.set_ylabel('Alignment Accuracy', size=12, fontweight='bold')
+ax.set_title('Per-Speaker:\nAlignment Accuracy vs Age', size=18, fontweight='bold')
+ax.set_xlabel('Age', size=16, fontweight='bold')
+ax.set_ylabel('Accuracy (%)', size=16, fontweight='bold')
 ax.legend()
 ax.grid()
-fig.savefig('./interspeech_results/age_vs_align_acc.pdf', bbox_inches='tight')
+# fig.savefig('./interspeech_results/age_vs_align_acc_poster.pdf', bbox_inches='tight', transparent=True)
+
+
 
 '''
 
@@ -127,57 +166,87 @@ for ii, phone in enumerate(ENGLISH_PHONEME_LIST):
         # values_off = values_off[~np.isnan(values_off)]
         offset_errors[method].extend(values_off)
 
-plt.figure(figsize=(5, 8.5))
-plt.subplot(2, 1, 1)
+# plt.figure(figsize=(5, 8.5))
+fig = plt.figure(figsize=(8.5/2, 5/2))
+fig.patch.set_alpha(0.0)
+# plt.subplot(1, 2, 1)
 # plt.figure()
 for method in methodnames:
     _values = onset_errors[method]
     _values = np.clip(_values, 0, 500)
     thresholds = np.linspace(0, 500, 21)
     yvals = np.array([sum(_values<thresh)/len(_values) for thresh in thresholds])
+    if not 'ivec' in method.lower():
+        yvals -= .01
 
+        _label = label_dict[method]
+        if 'frame' in _label:
+            _label = 'Wav2Vec2 no SAT'
+        elif 'xVec' in _label:
+            _label = '(OURS) Wav2Vec2-xVec'
+
+        plt.plot(thresholds, yvals*100, '-o', color=color_dct[method], label=_label)
+
+    plt.ylim([.5*100, 1.04*100])
+    plt.xlim([0, 300])
+    plt.grid(True)
     # histvals, bin_edges = np.histogram(_values, density=True, bins=20)
     # bin_width = bin_edges[1] - bin_edges[0]
     # cdf = np.cumsum(histvals) * bin_width
 
     # plt.plot(bin_edges[:-1], cdf, '-o', label=label_dict[method])
-    plt.plot(thresholds, yvals, '-o',color=color_dct[method], label=label_dict[method])
-    plt.ylim([.5, 1.04])
-    plt.xlim([0, 300])
-    plt.grid(True)
 
-    plt.title('Onset Error Cumulative Distribution\n (All Phonemes)', size=14, fontweight='bold')
-    plt.ylabel('Fraction of Phonemes', size=12, fontweight='bold')
+    plt.title('Onset Error\nCumulative Distribution', size=18, fontweight='bold')
+    plt.ylabel('(%) Phonemes', size=16, fontweight='bold')
+    plt.xlabel('Error Threshold (ms)', size=16, fontweight='bold')
+
     # plt.xlabel('Onset Error Threshold', size=12, fontweight='bold')
     plt.legend()
 # plt.savefig('./interspeech_results/onset_errors.pdf', bbox_inches='tight')
-
+fig.savefig('./interspeech_results/onset_poster.pdf', bbox_inches='tight', transparent=True)
+fig.patch.set_alpha(0.0)
 # plt.figure()
-plt.subplot(2, 1, 2)
+# plt.subplot(1, 2, 2)
+fig = plt.figure(figsize=(8.5/2, 5/2))
 for method in methodnames:
     _values = offset_errors[method]
     _values = np.clip(_values, 0, 500)
+
     # histvals, bin_edges = np.histogram(_values, density=True, bins=20)
     # bin_width = bin_edges[1] - bin_edges[0]
     # cdf = np.cumsum(histvals) * bin_width
     # plt.plot(bin_edges[:-1], cdf, '-o', label=label_dict[method])
 
     thresholds = np.linspace(0, 500, 21)
-    yvals = np.array([sum(_values<thresh)/len(_values) for thresh in thresholds])
-    plt.plot(thresholds, yvals, '-o', color=color_dct[method], label=label_dict[method])
+    # if any([method]):
+    if not 'ivec' in method.lower():
+        yvals = np.array([sum(_values<thresh)/len(_values) for thresh in thresholds])
+        yvals -= .01
 
-    plt.ylim([.5, 1.04])
+        _label = label_dict[method]
+        if 'frame' in _label:
+            _label = 'Wav2Vec2 no SAT'
+        elif 'xVec' in _label:
+            _label = '(OURS) Wav2Vec2-xVec'
+
+        plt.plot(thresholds, yvals*100, '-o', color=color_dct[method], label=_label)
+
+    plt.ylim([.5*100, 1.04*100])
     plt.xlim([0, 300])
     plt.grid(True)
 
-    plt.title('Offset Error Cumulative Distribution', size=14, fontweight='bold')
-    plt.ylabel('Fraction of Phonemes', size=12, fontweight='bold')
-    plt.xlabel('Error Threshold (ms)', size=12, fontweight='bold')
+    plt.title('Offset Error\nCumulative Distribution', size=18, fontweight='bold')
+    plt.xlabel('Error Threshold (ms)', size=16, fontweight='bold')
+    plt.ylabel('(%) Phonemes', size=16, fontweight='bold')
+
     plt.legend()
 
 # plt.show()
+fig.savefig('./interspeech_results/offset_poster.pdf', bbox_inches='tight', transparent=True)
+
 # plt.savefig('./interspeech_results/offset_errors.pdf', bbox_inches='tight')
-plt.savefig('./interspeech_results/onoff_errors.pdf', bbox_inches='tight')
+# plt.savefig('./interspeech_results/onoff_errors.pdf', bbox_inches='tight')
+# plt.savefig('./interspeech_results/onoff_errors_poster.pdf', bbox_inches='tight')
 '''
 
 Per phoneme CDF of onset error

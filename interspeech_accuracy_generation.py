@@ -24,6 +24,7 @@ def calc_acc_between_tg_lists(manual_tg_list, estimated_tg_list, collapse_shortp
     nlendiff = 0
     nconsecutive = 0
     all_transcripts = []
+    all_timingdfs = []
     for ii, (manual_textgridpath, estimated_textgridpath) in tqdm.tqdm(enumerate(zip(manual_tg_list, estimated_tg_list))):
         # try:
 
@@ -46,7 +47,7 @@ def calc_acc_between_tg_lists(manual_tg_list, estimated_tg_list, collapse_shortp
         all_transcripts.append(transcript)
         assert manual_textgridpath.split('/')[-1]==estimated_textgridpath.split('/')[-1], \
             f'Comparison Error! Comparing different textgrids. \nManualpath {manual_textgridpath}, \nEstimatedPath {estimated_textgridpath}'
-        _correct_indicator, ismatch = \
+        _correct_indicator, ismatch, timingdf = \
             calc_alignment_accuracy_between_textgrids(manual_textgridpath = manual_textgridpath,
                                                                       aligner_textgridpath = estimated_textgridpath,
                                                                       manual_phonekey=manual_phonekey,
@@ -54,9 +55,13 @@ def calc_acc_between_tg_lists(manual_tg_list, estimated_tg_list, collapse_shortp
                                                                       ignore_extras=ignore_extras,
                                                                       collapse_shortphones=collapse_shortphones)
 
+        fileid = manual_textgridpath.split('/')[-1].split('.')[0]
+        timingdf['Speaker'] = speakerid
+        timingdf['File'] = fileid
         __correct_indicator = np.copy(_correct_indicator)
         correct_indicator.append(_correct_indicator)
         running_acc = np.mean(np.concatenate(correct_indicator))
+        all_timingdfs.append(timingdf)
 
         if len(np.array(remove_sil_from_phonelist(_alignerphones)))  != len(manual_phones):
 
@@ -66,7 +71,7 @@ def calc_acc_between_tg_lists(manual_tg_list, estimated_tg_list, collapse_shortp
             nlendiff+=1
 
         elif len(_alignerphones) != len(_correct_indicator):
-            print('\n', np.array(remove_sil_from_phonelist(_alignerphones)), '\n', manual_phones, '\n', transcript)
+            print('\n', np.array(remove_sil_from_phonelist(_alignerphones)), '\n', manual_phones, '\n', transcript, '\n', _correct_indicator)
 
             print('')
             nmismatch +=1
@@ -77,10 +82,7 @@ def calc_acc_between_tg_lists(manual_tg_list, estimated_tg_list, collapse_shortp
             matched_phones.extend(_alignerphones)
             correct_indicator_matched.append(_correct_indicator)
 
-
-
-        # if ismatch:
-        #     correct_indicator_matched.append(_correct_indicator)
+            # correct_indicator_matched.append(_correct_indicator)
 
             # running_acc_matched = np.mean(np.concatenate(correct_indicator_matched))
 
@@ -117,7 +119,7 @@ def calc_acc_between_tg_lists(manual_tg_list, estimated_tg_list, collapse_shortp
         print('Num Predicted Phones Matched:\t', numpredicted_matched)
 
     return acc, acc_matched, numcorrect, numcorrect_matched, numpredicted, numpredicted_matched, \
-        correct_indicator, allphonelist
+        correct_indicator, allphonelist, all_timingdfs
 
 
 
@@ -125,8 +127,6 @@ def calc_acc_between_tg_lists(manual_tg_list, estimated_tg_list, collapse_shortp
 
 g2p = G2p()
 satdf = pd.read_csv('./results_sat/results.csv').set_index('Unnamed: 0')
-xsatdf = pd.read_csv('./results_sat_xvector/results_xvector_proj.csv')
-xsatdf = xsatdf.rename(columns={'Unnamed: 0': 'Speaker'})
 
 ALL_SPEAKERS = list(satdf.index)
 
@@ -137,7 +137,7 @@ results_dir_xvec = './phone_matched_xvec_proj_textgrids'
 
 EXCLUDE_FILES = ['0505_M_EKs4T10', '0411_M_LMwT32']
 
-allmanual_tgs = [pth for pth in get_all_textgrids_in_directory('/home/prad/datasets/ChildSpeechDataset/manually-aligned-text-grids/') if '.TextGrid' in pth]
+allmanual_tgs = [pth for pth in get_all_textgrids_in_directory('/media/prad/data/datasets/ChildSpeechDataset/manually-aligned-text-grids/') if '.TextGrid' in pth]
 allmanual_tgs = [tg for tg in allmanual_tgs if all([_excludefile not in tg for _excludefile in EXCLUDE_FILES])]
 
 ivector_tgs =[pth for pth in get_all_textgrids_in_directory('./results_sat') if '.TextGrid' in pth]
@@ -159,12 +159,25 @@ print(len(xvector_tgs))
 print(len(mfa_tgs))
 
 method_to_dir = {
-    'frame': './results_frame_10epochs',
-    'xvector': './phone_matched_xvec_proj_textgrids',
-    'mfa_train': './results_mfa_trained',
-    'ivector': './results_sat',
-    'mfa_base':'./results_mfa_adapted_english_us_arpa',
-    'gt': '/home/prad/datasets/ChildSpeechDataset/manually-aligned-text-grids/'}
+
+    'MFA_TrainNew': '/media/prad/data/datasets/ChildSpeechDataset/JSLHR_alignments/mfa_trained/',
+
+    'xVector': './phone_matched_xvec_proj_textgrids',
+
+    'W2V2Base': '/home/prad/github/DNN-PLLR/child_results_no_train/',
+    'xvectorNewNoLDA': '/home/prad/github/DNN-PLLR/results_sat_xvector_nolda/',
+    'xvectorNewWithLDA':'/home/prad/github/DNN-PLLR/results_sat_xvector_librilda/',
+    'MFA_AlignOld': './results_mfa_base',
+    'MFA_AlignNew': '/media/prad/data/datasets/ChildSpeechDataset/JSLHR_alignments/mfa_aligned/',
+    'MFA_AdaptNew': '/media/prad/data/datasets/ChildSpeechDataset/JSLHR_alignments/mfa_adapted_alignments/',
+    'MFA_Align_noSAT': '/media/prad/data/datasets/ChildSpeechDataset/JSLHR_alignments/mfa_noSAT/',
+    'MFA_TrainOld':'./results_mfa_trained',
+    'iVector': './results_sat',
+    'W2V2TrainedOld': './results_frame_10epochs',
+    'W2V2TrainedNew': '/home/prad/github/DNN-PLLR/textgrids/frame/',
+    'MFA_noSAT': './results_mfa_trained',
+    'gt': '/media/prad/data/datasets/ChildSpeechDataset/manually-aligned-text-grids/',
+    'interrater': '/media/prad/data/datasets/ChildSpeechDataset/interrater-check/'}
 
 
 speakers = ALL_SPEAKERS
@@ -178,15 +191,39 @@ RUN PARAMETERS
 ================================================================================
 
 '''
-rerun = True
+rerun = False
 overwrite_results = True
 '''
 Generate aggregate accuracy across all speakers
 '''
-aggregate_acc_csv = './interspeech_results/acc_results.csv'
+aggregate_acc_csv = './interspeech_results/acc_resultsJSLHR.csv'
+timing_dfs = {}
+
+method_to_dir = {
+
+    'MFA_TrainNew': '/media/prad/data/datasets/ChildSpeechDataset/JSLHR_alignments/mfa_trained/',
+
+    'xVector': './phone_matched_xvec_proj_textgrids',
+
+    'W2V2Base': '/home/prad/github/DNN-PLLR/child_results_no_train/',
+    'xvectorNewNoLDA': '/home/prad/github/DNN-PLLR/results_sat_xvector_nolda/',
+    'xvectorNewWithLDA':'/home/prad/github/DNN-PLLR/results_sat_xvector_librilda/',
+    'MFA_AlignOld': './results_mfa_base',
+    'MFA_AlignNew': '/media/prad/data/datasets/ChildSpeechDataset/JSLHR_alignments/mfa_aligned/',
+    'MFA_AdaptNew': '/media/prad/data/datasets/ChildSpeechDataset/JSLHR_alignments/mfa_adapted_alignments/',
+    'MFA_Align_noSAT': '/media/prad/data/datasets/ChildSpeechDataset/JSLHR_alignments/mfa_noSAT/',
+    'MFA_TrainOld':'./results_mfa_trained',
+    'iVector': './results_sat',
+    'W2V2TrainedOld': './results_frame_10epochs',
+    'W2V2TrainedNew': '/home/prad/github/DNN-PLLR/textgrids/frame/',
+    'MFA_noSAT': './results_mfa_trained',
+    'gt': '/media/prad/data/datasets/ChildSpeechDataset/manually-aligned-text-grids/',
+    'interrater': '/media/prad/data/datasets/ChildSpeechDataset/interrater-check/'}
+
+
 if not os.path.exists(aggregate_acc_csv) or rerun:
     for methodname in method_to_dir.keys():
-        if methodname=='gt':
+        if methodname=='gt' or methodname=='interrater':
             continue
         print('-------------------------------------------------------')
         print('Methodname:', methodname)
@@ -205,7 +242,7 @@ if not os.path.exists(aggregate_acc_csv) or rerun:
             all_gt_tgs.extend(tgs_manual)
             all_method_tgs.extend(tgs_method)
 
-        acc, acc_matched, numcorrect, numcorrect_matched, numpredicted, numpredicted_matched, correct_indicator, allphones = \
+        acc, acc_matched, numcorrect, numcorrect_matched, numpredicted, numpredicted_matched, correct_indicator, allphones, timingdfs = \
             calc_acc_between_tg_lists(all_gt_tgs, all_method_tgs, collapse_shortphones=collapse_shortphones,
                                       manual_phonekey='ha phones', aligner_phonekey='phones')
         acc_results_dct[methodname] = {'Acc': acc,
@@ -213,13 +250,173 @@ if not os.path.exists(aggregate_acc_csv) or rerun:
                                        'NumPredicted':numpredicted,
                                        'AccMatched': acc_matched,
                                        'NumCorrectMatched':numcorrect_matched,
-                                       'NumPredictedMatched':numpredicted_matched}
-
-
+                                       'NumPredictedMatched':numpredicted_matched,
+                                       }
+        timing_dfs[methodname] = timingdfs
     acc_rslts_df = pd.DataFrame.from_dict(acc_results_dct).T
 
     if overwrite_results:
         acc_rslts_df.to_csv(aggregate_acc_csv)
+        # acc_rslts_df['Timingdfs'] = timingdfs
+        pkl.dump(timing_dfs, open('./jslhr_timingdfs.pkl', 'wb'))
+
+
+'''
+SAMPLE SIZE ACC DFS GNEERATION
+'''
+rerun = False
+overwrite_results = True
+sample_size_dirs ={0.5: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction0.5_xvec/run_0/trained_alignments/TestAudio',
+ 0.1: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction0.1_xvec/run_0/trained_alignments/TestAudio',
+ 0.45: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction0.45_xvec/run_0/trained_alignments/TestAudio',
+ 0.3: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction0.3_xvec/run_0/trained_alignments/TestAudio',
+ 0.15: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction0.15_xvec/run_0/trained_alignments/TestAudio',
+ 0.4: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction0.4_xvec/run_0/trained_alignments/TestAudio',
+ 0.2: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction0.2_xvec/run_0/trained_alignments/TestAudio',
+ 1.0: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction1.0_xvec/run_0/trained_alignments/TestAudio',
+ 0.05: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction0.05_xvec/run_0/trained_alignments/TestAudio',
+ 0.029: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction0.029_xvec/run_0/trained_alignments/TestAudio',
+ 0.015: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction0.015_xvec/run_0/trained_alignments/TestAudio',
+ 0.35: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction0.35_xvec/run_0/trained_alignments/TestAudio',
+ 0.25: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction0.25_xvec/run_0/trained_alignments/TestAudio',
+ 0.075: '/home/prad/github/DNN-PLLR/alignment_training/child_interrater_split_fraction0.075_xvec/run_0/trained_alignments/TestAudio',
+'gt': '/media/prad/data/datasets/ChildSpeechDataset/manually-aligned-text-grids/',
+                   }
+aggregate_acc_csv = './interspeech_results/acc_resultsJSLHR_sample_size_acc.csv'
+timing_dfs = {}
+if not os.path.exists(aggregate_acc_csv) or rerun:
+    for methodname in sample_size_dirs.keys():
+        if methodname=='gt' or methodname=='interrater':
+            continue
+        print('-------------------------------------------------------')
+        print('Methodname:', methodname)
+        correct_indicator_matched = []
+        correct_indicator = []
+
+        all_gt_tgs = []
+        all_method_tgs = []
+
+        for speakerid in speakers:
+            tgs_manualpath = os.path.join(sample_size_dirs['gt'], speakerid)
+            tgs_methodpath = os.path.join(sample_size_dirs[methodname], speakerid)
+            tgs_manual = get_all_textgrids_in_directory(tgs_manualpath, verbose=False)
+            tgs_method = get_all_textgrids_in_directory(tgs_methodpath, verbose=False)
+            tgs_manual = [get_gt_tgpath(tgs_manual, _tgmethod) for _tgmethod in tgs_method]
+            all_gt_tgs.extend(tgs_manual)
+            all_method_tgs.extend(tgs_method)
+
+        acc, acc_matched, numcorrect, numcorrect_matched, numpredicted, numpredicted_matched, correct_indicator, allphones, timingdfs = \
+            calc_acc_between_tg_lists(all_gt_tgs, all_method_tgs, collapse_shortphones=collapse_shortphones,
+                                      manual_phonekey='ha phones', aligner_phonekey='phones')
+        acc_results_dct[methodname] = {'Acc': acc,
+                                       'NumCorrect':numcorrect,
+                                       'NumPredicted':numpredicted,
+                                       'AccMatched': acc_matched,
+                                       'NumCorrectMatched':numcorrect_matched,
+                                       'NumPredictedMatched':numpredicted_matched,
+                                       }
+        timing_dfs[methodname] = timingdfs
+    acc_rslts_df = pd.DataFrame.from_dict(acc_results_dct).T
+
+    if overwrite_results:
+        acc_rslts_df.to_csv(aggregate_acc_csv)
+        # acc_rslts_df['Timingdfs'] = timingdfs
+        pkl.dump(timing_dfs, open('./jslhr_timingdfs_sample_size_vs_acc.pkl', 'wb'))
+
+'''
+Generate Inter-rater results
+
+'''
+
+
+'''
+Generate Inter-rater
+'''
+timing_dfs = {}
+
+interrater_path = '/media/prad/data/datasets/ChildSpeechDataset/interrater-check/'
+manualalign_path = '/media/prad/data/datasets/ChildSpeechDataset/manually-aligned-text-grids'
+
+import glob
+method_to_dir = {
+
+    'MFA_TrainNew': '/media/prad/data/datasets/ChildSpeechDataset/JSLHR_alignments/mfa_trained/',
+
+    'xVector': './phone_matched_xvec_proj_textgrids',
+
+    'W2V2Base': '/home/prad/github/DNN-PLLR/child_results_no_train/',
+    'xvectorNewNoLDA': '/home/prad/github/DNN-PLLR/results_sat_xvector_nolda/',
+    'xvectorNewWithLDA':'/home/prad/github/DNN-PLLR/results_sat_xvector_librilda/',
+    'MFA_AlignOld': './results_mfa_base',
+    'MFA_AlignNew': '/media/prad/data/datasets/ChildSpeechDataset/JSLHR_alignments/mfa_aligned/',
+    'MFA_AdaptNew': '/media/prad/data/datasets/ChildSpeechDataset/JSLHR_alignments/mfa_adapted_alignments/',
+    'MFA_Align_noSAT': '/media/prad/data/datasets/ChildSpeechDataset/JSLHR_alignments/mfa_noSAT/',
+    'MFA_TrainOld':'./results_mfa_trained',
+    'iVector': './results_sat',
+    'W2V2TrainedOld': './results_frame_10epochs',
+    'W2V2TrainedNew': '/home/prad/github/DNN-PLLR/textgrids/frame/',
+    'MFA_noSAT': './results_mfa_trained',
+    'gt': '/media/prad/data/datasets/ChildSpeechDataset/manually-aligned-text-grids/',
+    'interrater': '/media/prad/data/datasets/ChildSpeechDataset/interrater-check/'}
+
+
+# for method in method_to_dir.keys():
+
+    # methodpath = method_to_dir[method]
+
+    # for speakerpath in glob.glob(interrater_path + '*'):
+    #     speaker = speakerpath.split('/')[-1]
+
+        # human1path = os.path.join(methodpath, speaker)
+        # human1_interratertgs.extend([file for file in glob.glob(f'{human1path}/*')])
+
+interrater_speakers = [speakerpath.split('/')[-1] for speakerpath in glob.glob(interrater_path + '*')]
+
+interrater_acc_csvpath = './interspeech_results/acc_results_interraterJSLHR.csv'
+if not os.path.exists(interrater_acc_csvpath):
+    for methodname in method_to_dir.keys():
+        # methodname='xvector'
+        if methodname=='gt':
+            continue
+        print('-------------------------------------------------------')
+        print('Methodname:', methodname)
+        correct_indicator_matched = []
+        correct_indicator = []
+
+        all_gt_tgs = []
+        all_method_tgs = []
+
+        for speakerid in interrater_speakers:
+            tgs_manualpath = os.path.join(method_to_dir['gt'], speakerid)
+            tgs_methodpath = os.path.join(method_to_dir[methodname], speakerid)
+            tgs_manual = get_all_textgrids_in_directory(tgs_manualpath, verbose=False)
+            tgs_method = get_all_textgrids_in_directory(tgs_methodpath, verbose=False)
+            tgs_manual = [get_gt_tgpath(tgs_manual, _tgmethod) for _tgmethod in tgs_method]
+            all_gt_tgs.extend(tgs_manual)
+            all_method_tgs.extend(tgs_method)
+
+
+        phonekey = 'ha phones' if methodname=='interrater' else 'phones'
+        acc, acc_matched, numcorrect, numcorrect_matched, numpredicted, numpredicted_matched, correct_indicator, allphones, timingdfs  = \
+            calc_acc_between_tg_lists(all_gt_tgs, all_method_tgs, collapse_shortphones=collapse_shortphones,
+                                      manual_phonekey='ha phones', aligner_phonekey=phonekey)
+        acc_results_dct[methodname] = {'Acc': acc,
+                                       'NumCorrect':numcorrect,
+                                       'NumPredicted':numpredicted,
+                                       'AccMatched': acc_matched,
+                                       'NumCorrectMatched':numcorrect_matched,
+                                       'NumPredictedMatched':numpredicted_matched,
+                                       'timingdfs':timingdfs}
+        timing_dfs[methodname] = timingdfs
+
+
+    interrater_acc_df = pd.DataFrame.from_dict(acc_results_dct).T
+
+    if overwrite_results:
+        interrater_acc_df.to_csv(interrater_acc_csvpath)
+        pkl.dump(timing_dfs, open('./jslhr_timingdfsINTERRATER.pkl', 'wb'))
+
+
 
 '''
 Generate per-speaker accuracy before and after fine tuning
@@ -229,7 +426,7 @@ speaker_acc_results = {}
 # usemethods = ['frame', 'ivector', 'xvector']
 usemethods = method_to_dir.keys()
 # per_speaker_csv = './interspeech_results/acc_results_speakerwise.csv'
-per_speaker_csv = './interspeech_results/speakerwise_acc_results.csv'
+per_speaker_csv = './interspeech_results/speakerwise_acc_resultsJSLHR.csv'
 phonelist = []
 acc_indicator = []
 if not os.path.exists(per_speaker_csv) or rerun:
@@ -268,28 +465,31 @@ if not os.path.exists(per_speaker_csv) or rerun:
 
     if overwrite_results:
         speakerwise_acc_df = pd.DataFrame.from_dict(speaker_acc_results).T
-        speakerwise_acc_df.to_csv('./interspeech_results/speakerwise_acc_results.csv')
+        speakerwise_acc_df.to_csv('./interspeech_results/speakerwise_acc_resultsJLSHR.csv')
 else:
-    speakerwise_acc_df = pd.read_csv('./interspeech_results/speakerwise_acc_results.csv')
+    speakerwise_acc_df = pd.read_csv('./interspeech_results/speakerwise_acc_resultsJSLHR.csv')
 
 
 ''' generate accuracy per phoneme class '''
 
 
 ''' generate interrater accuracy '''
-interrater_path = '/home/prad/datasets/ChildSpeechDataset/interrater-check/'
-manualalign_path = '/home/prad/datasets/ChildSpeechDataset/manually-aligned-text-grids'
+interrater_path = '/media/prad/data/datasets/ChildSpeechDataset/interrater-check/'
+manualalign_path = '/media/prad/data/datasets/ChildSpeechDataset/manually-aligned-text-grids'
 
 import glob
 
 method_to_dir = {
     'xvector': './phone_matched_xvec_proj_textgrids',
+    'xvectorNewNoLDA': '/home/prad/github/DNN-PLLLR/',
+    # 'xvector':,
+    # 'mfa'
     'ivector': './results_sat',
     'frame': './results_frame_10epochs',
     'mfa_base':'./results_mfa_adapted_english_us_arpa',
     'mfa_train': './results_mfa_trained',
-    'gt': '/home/prad/datasets/ChildSpeechDataset/manually-aligned-text-grids/',
-    'interrater': '/home/prad/datasets/ChildSpeechDataset/interrater-check/'}
+    'gt': '/media/prad/data/datasets/ChildSpeechDataset/manually-aligned-text-grids/',
+    'interrater': '/media/prad/data/datasets/ChildSpeechDataset/interrater-check/'}
 
 # for method in method_to_dir.keys():
 
@@ -306,6 +506,7 @@ interrater_speakers = [speakerpath.split('/')[-1] for speakerpath in glob.glob(i
 interrater_acc_csvpath = './interspeech_results/acc_results_interrater.csv'
 if not os.path.exists(interrater_acc_csvpath):
     for methodname in method_to_dir.keys():
+        # methodname='xvector'
         if methodname=='gt':
             continue
         print('-------------------------------------------------------')
@@ -327,7 +528,7 @@ if not os.path.exists(interrater_acc_csvpath):
 
 
         phonekey = 'ha phones' if methodname=='interrater' else 'phones'
-        acc, acc_matched, numcorrect, numcorrect_matched, numpredicted, numpredicted_matched, correct_indicator, allphones = \
+        acc, acc_matched, numcorrect, numcorrect_matched, numpredicted, numpredicted_matched, correct_indicator, allphones, timingdfs  = \
             calc_acc_between_tg_lists(all_gt_tgs, all_method_tgs, collapse_shortphones=collapse_shortphones,
                                       manual_phonekey='ha phones', aligner_phonekey=phonekey)
         acc_results_dct[methodname] = {'Acc': acc,
@@ -335,7 +536,8 @@ if not os.path.exists(interrater_acc_csvpath):
                                        'NumPredicted':numpredicted,
                                        'AccMatched': acc_matched,
                                        'NumCorrectMatched':numcorrect_matched,
-                                       'NumPredictedMatched':numpredicted_matched}
+                                       'NumPredictedMatched':numpredicted_matched,
+                                       'timingdfs':timingdfs}
 
 
     interrater_acc_df = pd.DataFrame.from_dict(acc_results_dct).T

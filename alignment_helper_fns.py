@@ -179,13 +179,15 @@ def get_all_filetype_in_directory(directory, filetype):
                 print(_fpath)
                 audiofiles.append(_fpath)
 
-def textgridpath_to_phonedf(txtgrid_path: str, phone_key: str, remove_numbers=False, replace_silence=True):
+def textgridpath_to_phonedf(txtgrid_path: str, phone_key: str, remove_numbers=False, replace_silence=True, includeEmptyIntervals=False):
     '''
     txtgrid_path - the path to the textgridfile
     phone_key - the key in the textgrid for the phoneme column
     '''
-    txtgrid = textgrid.openTextgrid(txtgrid_path, False)
+    txtgrid = textgrid.openTextgrid(txtgrid_path, includeEmptyIntervals=includeEmptyIntervals)
     phndf = extract_phone_df_from_textgrid(txtgrid=txtgrid, phone_key=phone_key, remove_numbers=remove_numbers)
+    if includeEmptyIntervals:
+        phndf = phndf.replace('', 'sil')
     if replace_silence:
         phndf = phndf.replace('[SIL]', 'sil')
         phndf = phndf.replace('sp', 'sil')
@@ -245,15 +247,15 @@ def calc_accuracy(predphn_df, annotated_midpoints_dict, ignore_extras=False):
         _end = predphn_df.iloc[ii, 1]
         if _phone in annotated_phns:
             midpoints = annotated_midpoints_dict[_phone]
-            for midpt in midpoints:
+            # for midpt in midpoints:
                 #                 print('Phoneme:\t', _phone)
                 #                 print('Annotated Midpoint:\t', midpt)
                 #                 print('Alinger Start:\t', _start)
                 #                 print('Alinger End:\t', _end)
-                if any([midpt < _end and midpt > _start for midpt in midpoints]):
-                    contains_midpoint = 'Correct'
-                else:
-                    contains_midpoint = 'Incorrect'
+            if any([midpt < _end and midpt > _start for midpt in midpoints]):
+                contains_midpoint = 'Correct'
+            else:
+                contains_midpoint = 'Incorrect'
 
         elif ignore_extras:
             # if ignore_extras is True, the
@@ -299,9 +301,9 @@ def calc_alignment_accuracy_between_textgrids(manual_textgridpath: str, aligner_
     #TODO: return the label along with whether it was correct so that you can figure out which phonemes were wrong
 
     manualdf = textgridpath_to_phonedf(manual_textgridpath, phone_key=manual_phonekey, remove_numbers=True,
-                                       replace_silence=replace_silence)
+                                       replace_silence=replace_silence, includeEmptyIntervals=True)
     alignerdf = textgridpath_to_phonedf(aligner_textgridpath, phone_key=aligner_phonekey, remove_numbers=True,
-                                        replace_silence=replace_silence)
+                                        replace_silence=replace_silence, includeEmptyIntervals=True)
     manual_phones = np.array(remove_sil_from_phonelist(manualdf.phone.values))
     aligner_phones = np.array(remove_sil_from_phonelist(alignerdf.phone.values))
     ismatch_pre = contains_same_phones(manual_phones, aligner_phones)
@@ -310,11 +312,26 @@ def calc_alignment_accuracy_between_textgrids(manual_textgridpath: str, aligner_
     if collapse_shortphones:
         alignerdf = process_silences(alignerdf, transcript)
 
-    manual_phones = np.array(remove_sil_from_phonelist(manualdf.phone.values))
-    aligner_phones = np.array(remove_sil_from_phonelist(alignerdf.phone.values))
     ismatch = contains_same_phones(manual_phones, aligner_phones)
-    if not ismatch:
+    timingdf = pd.merge(alignerdf.reset_index(), manualdf.reset_index(), left_on=['index', 'phone'],
+                 right_on=['index', 'phone'], suffixes=('_pred', '_gt')).drop(columns='index')
+
+    if len(timingdf)>len(alignerdf) or len(timingdf)>len(alignerdf) or len(timingdf)==0:
+        print()
         pass
+    #     timingdf=None
+    # else:
+
+    # if not ismatch:
+    #     print()
+    #     pass
+    # phn_midpoints_dict = extract_phn_midpoint_dict_from_df(manualdf)
+    # correct_indicator = calc_accuracy(predphn_df=alignerdf, annotated_midpoints_dict=phn_midpoints_dict,
+    #                                   ignore_extras=ignore_extras)
+    if not ismatch:
+        print()
+        pass
+
     phn_midpoints_dict = extract_phn_midpoint_dict_from_df(manualdf)
     correct_indicator = calc_accuracy(predphn_df=alignerdf, annotated_midpoints_dict=phn_midpoints_dict,
                                       ignore_extras=ignore_extras)
@@ -326,7 +343,7 @@ def calc_alignment_accuracy_between_textgrids(manual_textgridpath: str, aligner_
 
 
 
-    return correct_indicator, ismatch
+    return correct_indicator, ismatch, timingdf
 
 def calc_accuracy_between_textgrid_lists(manual_textgrid_list, estimated_textgrid_list, manual_phonekey='ha phones',
                                          aligner_phonekey='phones', ignore_extras=True, ignore_silence=False,
